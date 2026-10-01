@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.angular/
+.env
+*.log
+.DS_Store
+.claude/
+.agents/
+.windsurf/
