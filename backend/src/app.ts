@@ -9,7 +9,7 @@ import { apiRouter } from "./routes/index.js";
 export function createApp() {
   const app = express();
   app.use(helmet());
-  app.use(cors({ origin: env.CORS_ORIGIN }));
+  app.use(cors({ origin: env.CORS_ORIGIN.split(",").map((o) => o.trim()) }));
   app.use(express.json());
 
   // Liveness: process is up. Readiness: DB reachable.

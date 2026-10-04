@@ -6,7 +6,7 @@ const schema = z.object({
   PORT: z.coerce.number().default(3000),
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(16),
-  CORS_ORIGIN: z.string().default("http://localhost:4200"),
+  CORS_ORIGIN: z.string().default("http://localhost:4300"),
 });
 
 // Fail fast at boot with a readable message instead of failing later at first use.
