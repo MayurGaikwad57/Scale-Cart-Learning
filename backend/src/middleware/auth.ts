@@ -28,6 +28,21 @@ export const authenticate: RequestHandler = (req, _res, next) => {
   }
 };
 
+// For public routes that behave differently for logged-in users (e.g. admins see inactive
+// products). A missing or bad token is not an error here: the caller is just anonymous.
+export const optionalAuth: RequestHandler = (req, _res, next) => {
+  const header = req.headers.authorization;
+  if (header?.startsWith("Bearer ")) {
+    try {
+      const payload = jwt.verify(header.slice(7), env.JWT_SECRET) as jwt.JwtPayload;
+      req.user = { id: payload.sub as string, role: payload.role as Role };
+    } catch {
+      /* treat as anonymous */
+    }
+  }
+  next();
+};
+
 // Use after authenticate: requireRole("ADMIN")
 export const requireRole =
   (role: Role): RequestHandler =>

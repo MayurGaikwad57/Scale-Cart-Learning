@@ -8,4 +8,7 @@ export const usersController = {
   async login(req: Request, res: Response) {
     res.json(await usersService.login(req.body));
   },
+  async me(req: Request, res: Response) {
+    res.json({ user: await usersService.me(req.user!.id) });
+  },
 };
