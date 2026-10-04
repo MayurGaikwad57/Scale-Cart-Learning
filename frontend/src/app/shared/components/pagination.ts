@@ -1,21 +1,21 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import { Icon } from './icon';
 
 // Signal-based input()/output(): the parent passes numbers in and receives the chosen page back.
 @Component({
   selector: 'app-pagination',
+  imports: [Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (pages() > 1) {
-      <nav aria-label="Pagination">
-        <ul class="pagination justify-content-center mb-0">
-          <li class="page-item" [class.disabled]="page() <= 1">
-            <button class="page-link" (click)="pageChange.emit(page() - 1)" [disabled]="page() <= 1">Previous</button>
-          </li>
-          <li class="page-item disabled"><span class="page-link">Page {{ page() }} of {{ pages() }}</span></li>
-          <li class="page-item" [class.disabled]="page() >= pages()">
-            <button class="page-link" (click)="pageChange.emit(page() + 1)" [disabled]="page() >= pages()">Next</button>
-          </li>
-        </ul>
+      <nav class="sc-pager" aria-label="Pagination">
+        <button class="sc-btn sc-btn-sm" type="button" [disabled]="page() <= 1" (click)="pageChange.emit(page() - 1)">
+          <app-icon name="arrowLeft" [size]="16" /> Previous
+        </button>
+        <span class="sc-pager-info">Page {{ page() }} of {{ pages() }}</span>
+        <button class="sc-btn sc-btn-sm" type="button" [disabled]="page() >= pages()" (click)="pageChange.emit(page() + 1)">
+          Next <app-icon name="arrowRight" [size]="16" />
+        </button>
       </nav>
     }
   `,

@@ -9,7 +9,7 @@ export const createOrderSchema = z.object({ paymentMethod: z.enum(PAYMENT_METHOD
 export const listOrdersQuery = z.object(pageParams);
 
 const orderInclude = {
-  items: { include: { product: { select: { name: true, sku: true } } }, orderBy: { id: "asc" } },
+  items: { include: { product: { select: { name: true, sku: true, category: true } } }, orderBy: { id: "asc" } },
   payments: { orderBy: { createdAt: "desc" } },
 } satisfies Prisma.OrderInclude;
 
@@ -24,6 +24,7 @@ const toDto = (o: OrderRow) => ({
     productId: i.productId,
     name: i.product.name,
     sku: i.product.sku,
+    category: i.product.category,
     quantity: i.quantity,
     unitPriceCents: i.unitPriceCents,
     lineTotalCents: i.unitPriceCents * i.quantity,
