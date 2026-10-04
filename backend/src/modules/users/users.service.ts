@@ -28,6 +28,13 @@ export const usersService = {
     }
   },
 
+  async me(id: string) {
+    const user = await usersRepository.findById(id);
+    // A valid token for a deleted user is treated as logged out.
+    if (!user) throw unauthorized("invalid_token");
+    return { id: user.id, email: user.email, role: user.role };
+  },
+
   async login({ email, password }: LoginInput) {
     const user = await usersRepository.findByEmail(email);
     const ok = await bcrypt.compare(password, user?.passwordHash ?? DUMMY_HASH);
