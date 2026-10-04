@@ -5,64 +5,82 @@ import { errorMessage } from '../../core/http-error';
 import { PaymentMethod } from '../../core/models';
 import { CartService } from '../../core/services/cart.service';
 import { OrdersService } from '../../core/services/orders.service';
+import { Icon } from '../../shared/components/icon';
+import { ProductArt } from '../../shared/components/product-art';
 import { MoneyPipe } from '../../shared/pipes/money.pipe';
 
 @Component({
   selector: 'app-checkout-page',
-  imports: [ReactiveFormsModule, RouterLink, MoneyPipe],
+  imports: [ReactiveFormsModule, RouterLink, MoneyPipe, Icon, ProductArt],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <h1 class="h3 mb-3">Checkout</h1>
+    <div class="mb-4">
+      <ol class="sc-stepper mb-3" aria-label="Checkout progress">
+        <li class="sc-step done"><span class="sc-step-dot"><app-icon name="check" [size]="15" /></span> Cart</li>
+        <li class="sc-step-bar done"></li>
+        <li class="sc-step current"><span class="sc-step-dot">2</span> Payment</li>
+        <li class="sc-step-bar"></li>
+        <li class="sc-step"><span class="sc-step-dot">3</span> Confirmation</li>
+      </ol>
+      <h1 class="sc-page-title">Checkout</h1>
+    </div>
 
     @if (cart.items().length === 0) {
-      <div class="card card-body text-center py-5 shadow-sm">
-        <p class="mb-3 text-muted">There is nothing to check out.</p>
-        <div><a routerLink="/products" class="btn btn-primary">Browse products</a></div>
+      <div class="sc-card sc-empty">
+        <div class="sc-empty-icon"><app-icon name="cart" [size]="32" /></div>
+        <h2 class="h5">There is nothing to check out</h2>
+        <a routerLink="/products" class="sc-btn sc-btn-primary mt-2">Browse products</a>
       </div>
     } @else {
       @if (error()) {
-        <div class="alert alert-danger" role="alert">
-          {{ error() }} <a routerLink="/cart" class="alert-link ms-1">Review cart</a>
+        <div class="sc-alert sc-alert-danger mb-3" role="alert">
+          <app-icon name="alert" [size]="20" />
+          <span>{{ error() }} <a routerLink="/cart">Review your cart</a></span>
         </div>
       }
       <div class="row g-4">
         <div class="col-lg-7">
-          <div class="card shadow-sm">
-            <div class="card-body">
-              <h2 class="h5">Payment</h2>
-              <p class="small text-muted">
-                No real payment provider yet. Pick a <strong>test card</strong> to see both outcomes: success confirms the order,
-                decline cancels it and gives the reserved stock back.
-              </p>
-              <form [formGroup]="form" (ngSubmit)="place()">
-                <div class="form-check mb-2">
-                  <input class="form-check-input" type="radio" id="pm-ok" formControlName="paymentMethod" value="TEST_CARD_SUCCESS" />
-                  <label class="form-check-label" for="pm-ok">Test card: payment succeeds ✅</label>
-                </div>
-                <div class="form-check mb-3">
-                  <input class="form-check-input" type="radio" id="pm-fail" formControlName="paymentMethod" value="TEST_CARD_DECLINE" />
-                  <label class="form-check-label" for="pm-fail">Test card: payment is declined ❌</label>
-                </div>
-                <button class="btn btn-primary" type="submit" [disabled]="placing()">
-                  {{ placing() ? 'Placing order…' : 'Place order · ' + (cart.totalCents() | money) }}
-                </button>
-              </form>
+          <form [formGroup]="form" (ngSubmit)="place()" class="sc-card sc-card-pad">
+            <h2 class="h5 mb-1">Payment method</h2>
+            <p class="sc-muted small mb-3">
+              This is a demo store with no real payment provider. Choose a <b>test card</b> to see what happens in each case.
+            </p>
+
+            <div class="d-grid gap-3 mb-4">
+              <label class="sc-option">
+                <input type="radio" formControlName="paymentMethod" value="TEST_CARD_SUCCESS" />
+                <span class="sc-option-icon" style="background: var(--sc-success-50); color: var(--sc-success)"><app-icon name="checkCircle" [size]="22" /></span>
+                <span><b class="d-block">Test card: payment succeeds</b><span class="sc-muted small">The order is confirmed and your stock is sold to you.</span></span>
+                <span class="sc-radio"><app-icon name="check" [size]="14" /></span>
+              </label>
+              <label class="sc-option">
+                <input type="radio" formControlName="paymentMethod" value="TEST_CARD_DECLINE" />
+                <span class="sc-option-icon" style="background: var(--sc-danger-50); color: var(--sc-danger)"><app-icon name="xCircle" [size]="22" /></span>
+                <span><b class="d-block">Test card: payment is declined</b><span class="sc-muted small">The order is cancelled and the reserved stock is released.</span></span>
+                <span class="sc-radio"><app-icon name="check" [size]="14" /></span>
+              </label>
             </div>
-          </div>
+
+            <button class="sc-btn sc-btn-primary sc-btn-lg sc-btn-block" type="submit" [disabled]="placing()">
+              @if (placing()) { <span class="sc-spinner"></span> Placing your order… } @else { <app-icon name="lock" [size]="18" /> Place order · {{ cart.totalCents() | money }} }
+            </button>
+          </form>
         </div>
+
         <div class="col-lg-5">
-          <div class="card shadow-sm">
-            <div class="card-body">
-              <h2 class="h5">Order summary</h2>
-              <ul class="list-unstyled mb-3">
-                @for (item of cart.items(); track item.id) {
-                  <li class="d-flex justify-content-between small py-1">
-                    <span>{{ item.quantity }} × {{ item.name }}</span><span>{{ item.lineTotalCents | money }}</span>
-                  </li>
-                }
-              </ul>
-              <div class="d-flex justify-content-between fw-semibold border-top pt-2"><span>Total</span><span>{{ cart.totalCents() | money }}</span></div>
+          <div class="sc-card sc-card-pad sc-summary">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h2 class="h5 mb-0">Order summary</h2>
+              <a routerLink="/cart" class="small fw-semibold">Edit cart</a>
             </div>
+            @for (item of cart.items(); track item.id) {
+              <div class="d-flex align-items-center gap-3 py-2">
+                <app-product-art class="sc-thumb-sm" [sku]="item.sku" [category]="item.category" />
+                <div class="flex-grow-1 small"><div class="fw-semibold">{{ item.name }}</div><div class="sc-muted">Qty {{ item.quantity }}</div></div>
+                <div class="fw-semibold small">{{ item.lineTotalCents | money }}</div>
+              </div>
+            }
+            <div class="sc-total"><span>Total</span><span>{{ cart.totalCents() | money }}</span></div>
           </div>
         </div>
       </div>

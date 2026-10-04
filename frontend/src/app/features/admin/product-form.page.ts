@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, effect, inject, input, signal } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
+import { Icon } from '../../shared/components/icon';
 import { errorMessage } from '../../core/http-error';
 import { ProductInput, ProductsService } from '../../core/services/products.service';
 import { ToastService } from '../../core/services/toast.service';
@@ -8,35 +9,38 @@ import { ToastService } from '../../core/services/toast.service';
 // One form for both "new" (no id) and "edit" (id from the route).
 @Component({
   selector: 'app-product-form-page',
-  imports: [ReactiveFormsModule, RouterLink],
+  imports: [ReactiveFormsModule, RouterLink, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <a routerLink="/admin/products" class="small">&larr; Back to products</a>
-    <h1 class="h3 my-3">{{ id() ? 'Edit product' : 'New product' }}</h1>
+    <a routerLink="/admin/products" class="sc-btn sc-btn-ghost sc-btn-sm mb-3"><app-icon name="arrowLeft" [size]="16" /> All products</a>
+    <div class="mb-4">
+      <div class="sc-eyebrow">Admin</div>
+      <h1 class="sc-page-title">{{ id() ? 'Edit product' : 'New product' }}</h1>
+    </div>
 
     @if (error()) {
-      <div class="alert alert-danger" role="alert">{{ error() }}</div>
+      <div class="sc-alert sc-alert-danger mb-3" role="alert"><app-icon name="alert" [size]="20" /><span>{{ error() }}</span></div>
     }
 
-    <form [formGroup]="form" (ngSubmit)="save()" class="card card-body shadow-sm" novalidate>
+    <form [formGroup]="form" (ngSubmit)="save()" class="sc-card sc-card-pad" style="max-width: 860px" novalidate>
       <div class="row g-3">
         <div class="col-md-4">
           <label class="form-label" for="sku">SKU</label>
-          <input id="sku" class="form-control" formControlName="sku" [class.is-invalid]="invalid('sku')" />
+          <input id="sku" class="form-control" formControlName="sku" placeholder="e.g. ELEC-010" [class.is-invalid]="invalid('sku')" />
           <div class="invalid-feedback">Required (max 64 characters).</div>
         </div>
         <div class="col-md-8">
           <label class="form-label" for="name">Name</label>
-          <input id="name" class="form-control" formControlName="name" [class.is-invalid]="invalid('name')" />
+          <input id="name" class="form-control" formControlName="name" placeholder="Product name" [class.is-invalid]="invalid('name')" />
           <div class="invalid-feedback">Required (max 200 characters).</div>
         </div>
         <div class="col-12">
           <label class="form-label" for="description">Description</label>
-          <textarea id="description" rows="3" class="form-control" formControlName="description"></textarea>
+          <textarea id="description" rows="4" class="form-control" formControlName="description" placeholder="What makes it great?"></textarea>
         </div>
         <div class="col-md-4">
           <label class="form-label" for="category">Category</label>
-          <input id="category" class="form-control" formControlName="category" list="cats" [class.is-invalid]="invalid('category')" />
+          <input id="category" class="form-control" formControlName="category" list="cats" placeholder="Pick or type" [class.is-invalid]="invalid('category')" />
           <datalist id="cats"><option value="Electronics"></option><option value="Books"></option><option value="Home"></option><option value="Fashion"></option></datalist>
           <div class="invalid-feedback">Required.</div>
         </div>
@@ -52,17 +56,20 @@ import { ToastService } from '../../core/services/toast.service';
             <div class="invalid-feedback">Whole number, 0 or more.</div>
           </div>
         } @else {
-          <div class="col-md-4 d-flex align-items-end"><span class="small text-muted">Change stock from the product list.</span></div>
+          <div class="col-md-4 d-flex align-items-end"><span class="small sc-muted">Change stock from the product list.</span></div>
         }
         <div class="col-12">
-          <div class="form-check">
-            <input id="active" type="checkbox" class="form-check-input" formControlName="active" />
-            <label for="active" class="form-check-label">Active (visible in the shop)</label>
+          <div class="form-check form-switch">
+            <input id="active" type="checkbox" role="switch" class="form-check-input" formControlName="active" />
+            <label for="active" class="form-check-label">Visible in the shop</label>
           </div>
         </div>
       </div>
-      <div class="mt-4">
-        <button class="btn btn-primary" type="submit" [disabled]="saving()">{{ saving() ? 'Saving…' : 'Save' }}</button>
+      <div class="d-flex gap-2 mt-4 pt-3" style="border-top: 1px solid var(--sc-line)">
+        <button class="sc-btn sc-btn-primary" type="submit" [disabled]="saving()">
+          @if (saving()) { <span class="sc-spinner"></span> Saving… } @else { <app-icon name="check" [size]="18" /> Save product }
+        </button>
+        <a routerLink="/admin/products" class="sc-btn">Cancel</a>
       </div>
     </form>
   `,

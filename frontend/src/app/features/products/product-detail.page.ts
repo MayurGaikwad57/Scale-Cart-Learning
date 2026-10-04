@@ -1,55 +1,87 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { toObservable, toSignal } from '@angular/core/rxjs-interop';
-import { Router, RouterLink } from '@angular/router';
+import { RouterLink } from '@angular/router';
 import { catchError, map, of, startWith, switchMap } from 'rxjs';
-import { AuthService } from '../../core/auth/auth.service';
 import { errorMessage } from '../../core/http-error';
 import { Product } from '../../core/models';
-import { CartService } from '../../core/services/cart.service';
+import { CartActionsService } from '../../core/services/cart-actions.service';
 import { ProductsService } from '../../core/services/products.service';
-import { ToastService } from '../../core/services/toast.service';
-import { categoryIcon } from '../../shared/category-icon';
+import { Icon } from '../../shared/components/icon';
+import { ProductArt } from '../../shared/components/product-art';
 import { MoneyPipe } from '../../shared/pipes/money.pipe';
 
 type State = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ok'; product: Product };
 
 @Component({
   selector: 'app-product-detail-page',
-  imports: [RouterLink, MoneyPipe],
+  imports: [RouterLink, MoneyPipe, Icon, ProductArt],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <a routerLink="/products" class="small">&larr; Back to products</a>
-
     @switch (state().status) {
       @case ('loading') {
-        <div class="text-center py-5"><div class="spinner-border" role="status"></div></div>
+        <div class="row g-5">
+          <div class="col-md-6"><div class="sc-skel" style="aspect-ratio: 1; border-radius: 28px"></div></div>
+          <div class="col-md-6">
+            <div class="sc-skel mb-3" style="height: 16px; width: 30%"></div>
+            <div class="sc-skel mb-3" style="height: 40px; width: 80%"></div>
+            <div class="sc-skel mb-4" style="height: 36px; width: 35%"></div>
+            <div class="sc-skel mb-2" style="height: 14px"></div><div class="sc-skel" style="height: 14px; width: 85%"></div>
+          </div>
+        </div>
       }
       @case ('error') {
-        <div class="alert alert-danger mt-3" role="alert">{{ errorText() }}</div>
+        <div class="sc-card sc-empty">
+          <div class="sc-empty-icon"><app-icon name="alert" [size]="30" /></div>
+          <h2 class="h5">We couldn't load this product</h2>
+          <p class="sc-muted">{{ errorText() }}</p>
+          <a routerLink="/products" class="sc-btn sc-btn-primary">Back to shop</a>
+        </div>
       }
       @default {
         @if (product(); as p) {
-          <div class="row g-4 mt-1">
-            <div class="col-md-5"><div class="detail-tile">{{ icon() }}</div></div>
-            <div class="col-md-7">
-              <span class="badge text-bg-light mb-2">{{ p.category }}</span>
-              <h1 class="h3">{{ p.name }}</h1>
-              <div class="text-muted small mb-3">SKU {{ p.sku }}</div>
-              <div class="display-6 mb-2">{{ p.priceCents | money }}</div>
-              <p class="mb-3">{{ p.description || 'No description.' }}</p>
-              <div class="mb-3" [class]="p.stock === 0 ? 'text-danger' : p.stock <= 5 ? 'text-warning-emphasis' : 'text-success'">
-                {{ p.stock === 0 ? 'Out of stock' : p.stock <= 5 ? 'Only ' + p.stock + ' left' : 'In stock (' + p.stock + ')' }}
+          <nav class="sc-crumbs mb-4" aria-label="Breadcrumb">
+            <a routerLink="/products">Shop</a><app-icon name="chevronRight" [size]="14" />
+            <a routerLink="/products" [queryParams]="{ category: p.category }">{{ p.category }}</a><app-icon name="chevronRight" [size]="14" />
+            <span class="text-truncate" style="color: var(--sc-ink)">{{ p.name }}</span>
+          </nav>
+
+          <div class="row g-4 g-lg-5">
+            <div class="col-md-6"><app-product-art class="sc-detail-art" [sku]="p.sku" [category]="p.category" /></div>
+            <div class="col-md-6 d-flex flex-column">
+              <div class="d-flex gap-2 mb-3">
+                <span class="sc-pill sc-pill-primary no-dot">{{ p.category }}</span>
+                @if (!p.active) { <span class="sc-pill sc-pill-neutral">Inactive</span> }
               </div>
+              <h1 class="fw-bold mb-2" style="font-size: clamp(1.8rem, 3vw, 2.5rem)">{{ p.name }}</h1>
+              <div class="sc-muted small mb-3">SKU {{ p.sku }}</div>
+              <div class="mb-3" style="font-size: 2.2rem; font-weight: 800; letter-spacing: -0.03em">{{ p.priceCents | money }}</div>
+
+              <div class="sc-stockline mb-3" [style.color]="p.stock === 0 ? 'var(--sc-danger)' : p.stock <= 5 ? 'var(--sc-warn)' : 'var(--sc-success)'">
+                <span class="sc-dot"></span>
+                {{ p.stock === 0 ? 'Out of stock' : p.stock <= 5 ? 'Only ' + p.stock + ' left, order soon' : 'In stock (' + p.stock + ' available)' }}
+              </div>
+
+              <p class="sc-muted mb-4" style="line-height: 1.7">{{ p.description || 'No description yet.' }}</p>
+
               @if (p.stock > 0) {
-                <div class="d-flex gap-2 align-items-center">
-                  <label class="visually-hidden" for="qty">Quantity</label>
-                  <input id="qty" type="number" class="form-control w-auto" style="width: 90px !important" min="1" [max]="maxQty()"
-                    [value]="quantity()" (input)="setQuantity($any($event.target).valueAsNumber)" />
-                  <button class="btn btn-primary" [disabled]="adding()" (click)="addToCart(p)">
-                    {{ adding() ? 'Adding…' : 'Add to cart' }}
+                <div class="d-flex flex-wrap gap-3 align-items-center mb-4">
+                  <div class="sc-qty" role="group" aria-label="Quantity">
+                    <button type="button" aria-label="Decrease quantity" [disabled]="quantity() <= 1" (click)="setQuantity(quantity() - 1)"><app-icon name="minus" [size]="16" /></button>
+                    <input type="number" min="1" [max]="maxQty()" [value]="quantity()" aria-label="Quantity" (change)="setQuantity($any($event.target).valueAsNumber)" />
+                    <button type="button" aria-label="Increase quantity" [disabled]="quantity() >= maxQty()" (click)="setQuantity(quantity() + 1)"><app-icon name="plus" [size]="16" /></button>
+                  </div>
+                  <button class="sc-btn sc-btn-primary sc-btn-lg flex-grow-1" style="max-width: 320px" type="button" [disabled]="actions.busyId() === p.id" (click)="actions.add(p, quantity())">
+                    @if (actions.busyId() === p.id) { <span class="sc-spinner"></span> Adding… } @else { <app-icon name="cart" [size]="19" /> Add to cart }
                   </button>
                 </div>
               }
+
+              <div class="sc-card sc-card-pad mt-auto">
+                <div class="sc-perk mb-3"><span class="sc-perk-icon" style="width: 38px; height: 38px"><app-icon name="shield" [size]="19" /></span>
+                  <div class="small"><b>Stock held at checkout</b><div class="sc-muted">We lock availability while your order is processed.</div></div></div>
+                <div class="sc-perk"><span class="sc-perk-icon" style="width: 38px; height: 38px"><app-icon name="lock" [size]="19" /></span>
+                  <div class="small"><b>Test-mode payments</b><div class="sc-muted">Nothing real is charged on this demo store.</div></div></div>
+              </div>
             </div>
           </div>
         }
@@ -59,10 +91,7 @@ type State = { status: 'loading' } | { status: 'error'; message: string } | { st
 })
 export class ProductDetailPage {
   private readonly products = inject(ProductsService);
-  private readonly cart = inject(CartService);
-  private readonly auth = inject(AuthService);
-  private readonly router = inject(Router);
-  private readonly toast = inject(ToastService);
+  protected readonly actions = inject(CartActionsService);
 
   /** Bound from the route parameter :id (router uses withComponentInputBinding). */
   readonly id = input.required<string>();
@@ -87,31 +116,11 @@ export class ProductDetailPage {
     const s = this.state();
     return s.status === 'error' ? s.message : '';
   });
-  protected readonly icon = computed(() => categoryIcon(this.product()?.category ?? ''));
   protected readonly maxQty = computed(() => Math.min(this.product()?.stock ?? 1, 99));
 
   protected readonly quantity = signal(1);
-  protected readonly adding = signal(false);
 
   protected setQuantity(value: number): void {
     this.quantity.set(Number.isFinite(value) ? Math.min(Math.max(1, Math.floor(value)), this.maxQty()) : 1);
-  }
-
-  protected addToCart(product: Product): void {
-    if (!this.auth.isLoggedIn()) {
-      void this.router.navigate(['/login'], { queryParams: { returnUrl: this.router.url } });
-      return;
-    }
-    this.adding.set(true);
-    this.cart.add(product.id, this.quantity()).subscribe({
-      next: () => {
-        this.toast.show(`Added ${this.quantity()} × "${product.name}" to your cart`);
-        this.adding.set(false);
-      },
-      error: (e) => {
-        this.toast.show(errorMessage(e), 'danger', 4000);
-        this.adding.set(false);
-      },
-    });
   }
 }

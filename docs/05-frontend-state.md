@@ -20,3 +20,13 @@ Rule from the plan: do not use Signals just because they are new. For each piece
 - **Lazy loading:** every page is a `loadComponent` import; Bootstrap CSS only, no Bootstrap JS and no Angular Material.
 - **OnPush** on every component; with signals the view updates exactly when a signal it read changes.
 - **Route params as inputs** (`withComponentInputBinding`): `id = input.required<string>()` instead of injecting `ActivatedRoute`.
+
+## Visual design system (`frontend/src/styles.css`)
+- **Approach:** Bootstrap supplies only the grid, spacing/flex utilities and form/table reset. Everything visible (colours, buttons, cards, nav, hero) is our own CSS built on custom properties (`--sc-primary`, `--sc-radius`, ...), so a re-theme is a change of a few variables. Bootstrap's own variables (`--bs-*`) are pointed at the same palette.
+- **Class naming:** `sc-` prefix (`sc-btn`, `sc-card`, `sc-pill`, `sc-product`, ...) so our styles never collide with Bootstrap's.
+- **Icons:** `<app-icon name="cart">` renders inline SVG from a constant map (no icon font, no extra request). The SVG strings are our own constants, which is why trusting them in `DomSanitizer` is safe.
+- **Product art:** products have no photos yet, so `productArt(sku, category)` generates a deterministic gradient + emoji. Swapping in real images later only touches `ProductArt`.
+- **Loading states:** skeleton shimmer blocks instead of spinners, so the layout does not jump when data arrives.
+- **Accessibility:** visible focus rings, `aria-label`s on icon buttons, `aria-live` regions for results and toasts, labels on every input, and `prefers-reduced-motion` support.
+- **Responsive:** mobile-first; the catalog sidebar collapses behind a "Filters" button and the navbar collapses to a menu below `md`.
+- **Fonts:** Inter from Google Fonts (falls back to the system font stack offline).

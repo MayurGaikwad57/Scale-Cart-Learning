@@ -68,6 +68,7 @@ export interface OrderItem {
   productId: string;
   name: string;
   sku: string;
+  category: string;
   quantity: number;
   unitPriceCents: number;
   lineTotalCents: number;

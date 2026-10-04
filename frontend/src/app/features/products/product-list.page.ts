@@ -1,14 +1,12 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { FormControl, NonNullableFormBuilder, ReactiveFormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
 import { catchError, debounceTime, map, of, startWith, switchMap, tap } from 'rxjs';
-import { AuthService } from '../../core/auth/auth.service';
 import { errorMessage } from '../../core/http-error';
 import { Page, Product, ProductQuery, ProductSort } from '../../core/models';
-import { CartService } from '../../core/services/cart.service';
+import { CartActionsService } from '../../core/services/cart-actions.service';
 import { ProductsService } from '../../core/services/products.service';
-import { ToastService } from '../../core/services/toast.service';
+import { Icon } from '../../shared/components/icon';
 import { Pagination } from '../../shared/components/pagination';
 import { ProductCard } from '../../shared/components/product-card';
 
@@ -17,81 +15,114 @@ const toCents = (rupees: number | null): number | undefined => (rupees === null 
 
 @Component({
   selector: 'app-product-list-page',
-  imports: [ReactiveFormsModule, ProductCard, Pagination],
+  imports: [ReactiveFormsModule, ProductCard, Pagination, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <h1 class="h3 mb-3">Products</h1>
+    <div class="d-flex flex-wrap align-items-end justify-content-between gap-3 mb-4">
+      <div>
+        <div class="sc-eyebrow">Catalog</div>
+        <h1 class="sc-page-title">Shop all products</h1>
+      </div>
+      <div class="d-flex gap-2 align-items-center">
+        <button type="button" class="sc-btn d-lg-none" (click)="filtersOpen.set(!filtersOpen())" [attr.aria-expanded]="filtersOpen()">
+          <app-icon name="sliders" [size]="18" /> Filters
+          @if (activeCount() > 0) { <span class="sc-pill sc-pill-primary no-dot">{{ activeCount() }}</span> }
+        </button>
+        <label class="visually-hidden" for="sort">Sort by</label>
+        <select id="sort" class="form-select" style="min-width: 190px" [formControl]="form.controls.sort">
+          <option value="newest">Newest first</option>
+          <option value="price_asc">Price: low to high</option>
+          <option value="price_desc">Price: high to low</option>
+          <option value="name">Name: A to Z</option>
+        </select>
+      </div>
+    </div>
 
-    <form [formGroup]="form" class="card card-body shadow-sm mb-4" (submit)="$event.preventDefault()">
-      <div class="row g-2 align-items-end">
-        <div class="col-12 col-lg-4">
-          <label class="form-label small mb-1" for="q">Search</label>
-          <input id="q" class="form-control" formControlName="q" placeholder="Name, description or SKU" />
-        </div>
-        <div class="col-6 col-lg-2">
-          <label class="form-label small mb-1" for="category">Category</label>
-          <select id="category" class="form-select" formControlName="category">
-            <option value="">All</option>
+    <div class="sc-search mb-4">
+      <app-icon name="search" [size]="20" />
+      <label class="visually-hidden" for="q">Search products</label>
+      <input id="q" class="form-control" [formControl]="form.controls.q" placeholder="Search by name, description or SKU…" autocomplete="off" />
+    </div>
+
+    <div class="row g-4">
+      <aside class="col-lg-3" [class.d-none]="!filtersOpen()" [class.d-lg-block]="true">
+        <div class="sc-card sc-card-pad sc-filters">
+          <h2 class="sc-filter-title">Category</h2>
+          <div class="sc-filter-list mb-4" role="group" aria-label="Category">
+            <button type="button" class="sc-filter-opt" [class.on]="!form.controls.category.value" (click)="form.controls.category.setValue('')">All products</button>
             @for (c of categories(); track c) {
-              <option [value]="c">{{ c }}</option>
+              <button type="button" class="sc-filter-opt" [class.on]="form.controls.category.value === c" (click)="form.controls.category.setValue(c)">{{ c }}</button>
             }
-          </select>
-        </div>
-        <div class="col-3 col-lg-1">
-          <label class="form-label small mb-1" for="min">Min ₹</label>
-          <input id="min" type="number" min="0" class="form-control" formControlName="minPrice" />
-        </div>
-        <div class="col-3 col-lg-1">
-          <label class="form-label small mb-1" for="max">Max ₹</label>
-          <input id="max" type="number" min="0" class="form-control" formControlName="maxPrice" />
-        </div>
-        <div class="col-8 col-lg-3">
-          <label class="form-label small mb-1" for="sort">Sort by</label>
-          <select id="sort" class="form-select" formControlName="sort">
-            <option value="newest">Newest</option>
-            <option value="price_asc">Price: low to high</option>
-            <option value="price_desc">Price: high to low</option>
-            <option value="name">Name</option>
-          </select>
-        </div>
-        <div class="col-4 col-lg-1 d-grid">
-          <button type="button" class="btn btn-outline-secondary" (click)="reset()">Reset</button>
-        </div>
-      </div>
-    </form>
+          </div>
 
-    @if (error()) {
-      <div class="alert alert-danger" role="alert">{{ error() }}</div>
-    }
+          <h2 class="sc-filter-title">Price (₹)</h2>
+          <div class="d-flex align-items-center gap-2 mb-4">
+            <label class="visually-hidden" for="min">Minimum price</label>
+            <input id="min" type="number" min="0" class="form-control" placeholder="Min" [formControl]="form.controls.minPrice" />
+            <span class="sc-muted">–</span>
+            <label class="visually-hidden" for="max">Maximum price</label>
+            <input id="max" type="number" min="0" class="form-control" placeholder="Max" [formControl]="form.controls.maxPrice" />
+          </div>
 
-    @if (loading() && !result()) {
-      <div class="text-center py-5"><div class="spinner-border" role="status"><span class="visually-hidden">Loading</span></div></div>
-    } @else if (result(); as r) {
-      <div class="d-flex justify-content-between small text-muted mb-2">
-        <span>{{ r.total }} product{{ r.total === 1 ? '' : 's' }}</span>
-        @if (loading()) { <span>Updating…</span> }
-      </div>
-      @if (r.items.length === 0) {
-        <div class="text-center text-muted py-5">No products match your filters.</div>
-      } @else {
-        <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-3 mb-4">
-          @for (p of r.items; track p.id) {
-            <div class="col"><app-product-card [product]="p" [busy]="addingId() === p.id" (add)="addToCart($event)" /></div>
+          <button type="button" class="sc-btn sc-btn-block" [disabled]="activeCount() === 0" (click)="reset()">Clear all filters</button>
+        </div>
+      </aside>
+
+      <section class="col-lg-9" aria-live="polite">
+        @if (error()) {
+          <div class="sc-alert sc-alert-danger mb-3" role="alert"><app-icon name="alert" [size]="20" /><span>{{ error() }}</span></div>
+        }
+
+        @if (chips().length > 0) {
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            @for (chip of chips(); track chip.key) {
+              <span class="sc-chip">{{ chip.label }}<button type="button" [attr.aria-label]="'Remove filter ' + chip.label" (click)="clearChip(chip.key)"><app-icon name="x" [size]="12" /></button></span>
+            }
+          </div>
+        }
+
+        @if (loading() && !result()) {
+          <div class="row row-cols-2 row-cols-md-3 g-3">
+            @for (n of skeletons; track n) {
+              <div class="col"><div class="sc-card"><div class="sc-skel" style="aspect-ratio: 4/3; border-radius: 16px 16px 0 0"></div>
+                <div class="p-3"><div class="sc-skel mb-2" style="height: 12px; width: 40%"></div><div class="sc-skel mb-3" style="height: 16px"></div><div class="sc-skel" style="height: 22px; width: 50%"></div></div></div></div>
+            }
+          </div>
+        } @else if (result(); as r) {
+          <div class="d-flex justify-content-between small sc-muted fw-semibold mb-3">
+            <span>{{ r.total }} product{{ r.total === 1 ? '' : 's' }}</span>
+            @if (loading()) { <span>Updating…</span> }
+          </div>
+          @if (r.items.length === 0) {
+            <div class="sc-card sc-empty">
+              <div class="sc-empty-icon"><app-icon name="search" [size]="30" /></div>
+              <h2 class="h5">No products match your filters</h2>
+              <p class="sc-muted">Try a different search or clear the filters.</p>
+              <button type="button" class="sc-btn sc-btn-primary" (click)="reset()">Clear all filters</button>
+            </div>
+          } @else {
+            <div class="row row-cols-2 row-cols-md-3 g-3 mb-4" [style.opacity]="loading() ? 0.6 : 1" style="transition: opacity .15s">
+              @for (p of r.items; track p.id) {
+                <div class="col"><app-product-card [product]="p" [busy]="actions.busyId() === p.id" (add)="actions.add($event)" /></div>
+              }
+            </div>
+            <app-pagination [page]="page()" [pageSize]="pageSize" [total]="r.total" (pageChange)="goToPage($event)" />
           }
-        </div>
-        <app-pagination [page]="page()" [pageSize]="pageSize" [total]="r.total" (pageChange)="goToPage($event)" />
-      }
-    }
+        }
+      </section>
+    </div>
   `,
 })
 export class ProductListPage {
   private readonly products = inject(ProductsService);
-  private readonly cart = inject(CartService);
-  private readonly auth = inject(AuthService);
-  private readonly router = inject(Router);
-  private readonly toast = inject(ToastService);
+  protected readonly actions = inject(CartActionsService);
+
+  /** Optional query params (?category=Books&q=lamp), e.g. from the home page's category tiles. */
+  readonly category = input<string | undefined>();
+  readonly q = input<string | undefined>();
 
   protected readonly pageSize = PAGE_SIZE;
+  protected readonly skeletons = Array.from({ length: 6 }, (_, i) => i);
 
   // Filters live in a reactive form (user input). The page number is separate local state.
   protected readonly form = inject(NonNullableFormBuilder).group({
@@ -104,9 +135,9 @@ export class ProductListPage {
   protected readonly page = signal(1);
   protected readonly loading = signal(false);
   protected readonly error = signal<string | null>(null);
-  protected readonly addingId = signal<string | null>(null);
+  protected readonly filtersOpen = signal(false);
 
-  protected readonly categories = toSignal(this.products.categories().pipe(catchError(() => of([] as string[]))), { initialValue: [] });
+  protected readonly categories = toSignal(this.products.categories().pipe(catchError(() => of([] as string[]))), { initialValue: [] as string[] });
 
   // The form's current value as a signal, so the query below can be a computed().
   private readonly filters = toSignal(
@@ -130,6 +161,19 @@ export class ProductListPage {
       sort: f.sort,
     };
   });
+
+  /** The removable "chips" shown above the grid, derived from the current filters. */
+  protected readonly chips = computed(() => {
+    const f = this.filters();
+    const chips: { key: 'q' | 'category' | 'price'; label: string }[] = [];
+    if (f.q.trim()) chips.push({ key: 'q', label: `“${f.q.trim()}”` });
+    if (f.category) chips.push({ key: 'category', label: f.category });
+    if (f.minPrice !== null || f.maxPrice !== null) {
+      chips.push({ key: 'price', label: `₹${f.minPrice ?? 0} – ${f.maxPrice !== null ? '₹' + f.maxPrice : 'any'}` });
+    }
+    return chips;
+  });
+  protected readonly activeCount = computed(() => this.chips().length);
 
   // RxJS does what it is best at here: wait while the user types (debounceTime) and cancel the
   // previous in-flight request when a newer query arrives (switchMap), so stale results never overwrite fresh ones.
@@ -156,6 +200,13 @@ export class ProductListPage {
   constructor() {
     // A changed filter means "start from page 1" (otherwise you could land on a page that no longer exists).
     this.form.valueChanges.pipe(takeUntilDestroyed()).subscribe(() => this.page.set(1));
+
+    // Query params arrive as signal inputs; copy them into the form (also when only the URL changes).
+    effect(() => {
+      const category = this.category();
+      const q = this.q();
+      untracked(() => this.form.patchValue({ category: category ?? '', q: q ?? '' }));
+    });
   }
 
   protected goToPage(p: number): void {
@@ -163,25 +214,13 @@ export class ProductListPage {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  protected reset(): void {
-    this.form.reset({ q: '', category: '', minPrice: null, maxPrice: null, sort: 'newest' });
+  protected clearChip(key: 'q' | 'category' | 'price'): void {
+    if (key === 'q') this.form.controls.q.setValue('');
+    else if (key === 'category') this.form.controls.category.setValue('');
+    else this.form.patchValue({ minPrice: null, maxPrice: null });
   }
 
-  protected addToCart(product: Product): void {
-    if (!this.auth.isLoggedIn()) {
-      void this.router.navigate(['/login'], { queryParams: { returnUrl: this.router.url } });
-      return;
-    }
-    this.addingId.set(product.id);
-    this.cart.add(product.id, 1).subscribe({
-      next: () => {
-        this.toast.show(`Added "${product.name}" to your cart`);
-        this.addingId.set(null);
-      },
-      error: (e) => {
-        this.toast.show(errorMessage(e), 'danger', 4000);
-        this.addingId.set(null);
-      },
-    });
+  protected reset(): void {
+    this.form.reset({ q: '', category: '', minPrice: null, maxPrice: null, sort: 'newest' });
   }
 }

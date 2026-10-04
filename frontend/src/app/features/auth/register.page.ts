@@ -3,6 +3,7 @@ import { AbstractControl, NonNullableFormBuilder, ReactiveFormsModule, Validatio
 import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import { errorMessage } from '../../core/http-error';
+import { Icon } from '../../shared/components/icon';
 
 // Group-level validator: runs when either password field changes.
 const passwordsMatch = (group: AbstractControl): ValidationErrors | null =>
@@ -10,49 +11,53 @@ const passwordsMatch = (group: AbstractControl): ValidationErrors | null =>
 
 @Component({
   selector: 'app-register-page',
-  imports: [ReactiveFormsModule, RouterLink],
+  imports: [ReactiveFormsModule, RouterLink, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="row justify-content-center">
-      <div class="col-md-6 col-lg-5">
-        <div class="card shadow-sm">
-          <div class="card-body p-4">
-            <h1 class="h4 mb-3">Create account</h1>
-            @if (error()) {
-              <div class="alert alert-danger" role="alert">{{ error() }}</div>
-            }
-            <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
-              <div class="mb-3">
-                <label class="form-label" for="email">Email</label>
-                <input id="email" type="email" class="form-control" formControlName="email" autocomplete="username"
-                  [class.is-invalid]="invalid('email')" />
-                @if (invalid('email')) {
-                  <div class="invalid-feedback">Enter a valid email address.</div>
-                }
-              </div>
-              <div class="mb-3">
-                <label class="form-label" for="password">Password</label>
-                <input id="password" type="password" class="form-control" formControlName="password" autocomplete="new-password"
-                  [class.is-invalid]="invalid('password')" />
-                <div class="form-text">8 to 72 characters.</div>
-                @if (invalid('password')) {
-                  <div class="invalid-feedback">Password must be 8 to 72 characters.</div>
-                }
-              </div>
-              <div class="mb-3">
-                <label class="form-label" for="confirm">Confirm password</label>
-                <input id="confirm" type="password" class="form-control" formControlName="confirm" autocomplete="new-password"
-                  [class.is-invalid]="invalid('confirm') || mismatch()" />
-                @if (mismatch()) {
-                  <div class="invalid-feedback">Passwords do not match.</div>
-                }
-              </div>
-              <button class="btn btn-primary w-100" type="submit" [disabled]="submitting()">
-                {{ submitting() ? 'Creating account…' : 'Register' }}
-              </button>
-            </form>
-            <p class="mt-3 mb-0 small">Already registered? <a routerLink="/login">Log in</a></p>
-          </div>
+    <div class="sc-auth">
+      <div class="sc-auth-side">
+        <a class="sc-brand" style="color: #fff" routerLink="/"><span class="sc-logo" style="background: rgba(255,255,255,.2); box-shadow: none"><app-icon name="bag" [size]="19" /></span> ScaleCart</a>
+        <div>
+          <h2>Create your account.<br />Start shopping in seconds.</h2>
+          <ul class="list-unstyled mt-4 mb-0">
+            <li><app-icon name="checkCircle" [size]="20" /> Free to join, nothing to install</li>
+            <li><app-icon name="checkCircle" [size]="20" /> Reserve stock the moment you check out</li>
+            <li><app-icon name="checkCircle" [size]="20" /> Full order history in one place</li>
+          </ul>
+        </div>
+        <div class="small" style="color: rgba(255,255,255,.7)">A learning project: modular monolith → microservices.</div>
+      </div>
+      <div class="sc-auth-form">
+        <div class="inner">
+          <h1 class="fw-bold mb-1" style="font-size: 1.9rem">Create account</h1>
+          <p class="sc-muted mb-4">It only takes a moment.</p>
+          @if (error()) {
+            <div class="sc-alert sc-alert-danger mb-3" role="alert"><app-icon name="alert" [size]="20" /><span>{{ error() }}</span></div>
+          }
+          <form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+            <div class="mb-3">
+              <label class="form-label" for="email">Email</label>
+              <input id="email" type="email" class="form-control" formControlName="email" autocomplete="username" placeholder="you@example.com"
+                [class.is-invalid]="invalid('email')" />
+              @if (invalid('email')) { <div class="invalid-feedback">Enter a valid email address.</div> }
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="password">Password</label>
+              <input id="password" type="password" class="form-control" formControlName="password" autocomplete="new-password" placeholder="8 to 72 characters"
+                [class.is-invalid]="invalid('password')" />
+              @if (invalid('password')) { <div class="invalid-feedback">Password must be 8 to 72 characters.</div> }
+            </div>
+            <div class="mb-4">
+              <label class="form-label" for="confirm">Confirm password</label>
+              <input id="confirm" type="password" class="form-control" formControlName="confirm" autocomplete="new-password" placeholder="Repeat your password"
+                [class.is-invalid]="invalid('confirm') || mismatch()" />
+              @if (mismatch()) { <div class="invalid-feedback">Passwords do not match.</div> }
+            </div>
+            <button class="sc-btn sc-btn-primary sc-btn-lg sc-btn-block" type="submit" [disabled]="submitting()">
+              @if (submitting()) { <span class="sc-spinner"></span> Creating account… } @else { Create account }
+            </button>
+          </form>
+          <p class="mt-4 mb-0 text-center sc-muted">Already registered? <a routerLink="/login" class="fw-semibold">Log in</a></p>
         </div>
       </div>
     </div>

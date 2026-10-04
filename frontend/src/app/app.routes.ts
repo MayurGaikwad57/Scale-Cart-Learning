@@ -3,7 +3,7 @@ import { adminGuard, authGuard, guestGuard } from './core/guards/auth.guard';
 
 // Every page is lazy-loaded: its code is only downloaded when the user first visits it.
 export const routes: Routes = [
-  { path: '', pathMatch: 'full', redirectTo: 'products' },
+  { path: '', pathMatch: 'full', title: 'ScaleCart · Shop smarter', loadComponent: () => import('./features/home/home.page').then((m) => m.HomePage) },
 
   { path: 'login', canActivate: [guestGuard], title: 'Log in · ScaleCart', loadComponent: () => import('./features/auth/login.page').then((m) => m.LoginPage) },
   { path: 'register', canActivate: [guestGuard], title: 'Register · ScaleCart', loadComponent: () => import('./features/auth/register.page').then((m) => m.RegisterPage) },

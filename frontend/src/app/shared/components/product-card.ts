@@ -2,29 +2,33 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
 import { RouterLink } from '@angular/router';
 import { Product } from '../../core/models';
 import { MoneyPipe } from '../pipes/money.pipe';
-import { categoryIcon } from '../category-icon';
+import { Icon } from './icon';
+import { ProductArt } from './product-art';
 
 @Component({
   selector: 'app-product-card',
-  imports: [RouterLink, MoneyPipe],
+  imports: [RouterLink, MoneyPipe, Icon, ProductArt],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="card h-100 shadow-sm product-card">
-      <a [routerLink]="['/products', product().id]" class="product-tile text-decoration-none" aria-hidden="true">{{ icon() }}</a>
-      <div class="card-body d-flex flex-column">
-        <span class="badge text-bg-light align-self-start mb-2">{{ product().category }}</span>
-        <h6 class="card-title">
-          <a [routerLink]="['/products', product().id]" class="text-reset text-decoration-none stretched-name">{{ product().name }}</a>
-        </h6>
-        <div class="mt-auto">
-          <div class="fs-5 fw-semibold">{{ product().priceCents | money }}</div>
-          <div class="small mb-2" [class]="stockClass()">{{ stockText() }}</div>
-          <button class="btn btn-primary w-100" [disabled]="product().stock === 0 || busy()" (click)="add.emit(product())">
-            {{ product().stock === 0 ? 'Out of stock' : 'Add to cart' }}
+    <article class="sc-card sc-product">
+      <a class="sc-product-media" [routerLink]="['/products', product().id]" [attr.aria-label]="'View ' + product().name" tabindex="-1">
+        <app-product-art [sku]="product().sku" [category]="product().category" />
+        @if (flag(); as f) {
+          <span class="sc-pill sc-product-flag sc-pill-{{ f.kind }}">{{ f.text }}</span>
+        }
+      </a>
+      <div class="sc-product-body">
+        <span class="sc-product-cat">{{ product().category }}</span>
+        <h3 class="sc-product-name"><a [routerLink]="['/products', product().id]">{{ product().name }}</a></h3>
+        <div class="sc-product-foot">
+          <span class="sc-price">{{ product().priceCents | money }}</span>
+          <button class="sc-add" type="button" [disabled]="product().stock === 0 || busy()" (click)="add.emit(product())"
+            [attr.aria-label]="product().stock === 0 ? product().name + ' is out of stock' : 'Add ' + product().name + ' to cart'">
+            @if (busy()) { <span class="sc-spinner"></span> } @else { <app-icon name="plus" [size]="20" /> }
           </button>
         </div>
       </div>
-    </div>
+    </article>
   `,
 })
 export class ProductCard {
@@ -32,13 +36,11 @@ export class ProductCard {
   readonly busy = input(false);
   readonly add = output<Product>();
 
-  protected readonly icon = computed(() => categoryIcon(this.product().category));
-  protected readonly stockText = computed(() => {
+  // Only call out the interesting states; plenty of stock needs no label.
+  protected readonly flag = computed<{ text: string; kind: 'danger' | 'warn' } | null>(() => {
     const s = this.product().stock;
-    return s === 0 ? 'Out of stock' : s <= 5 ? `Only ${s} left` : 'In stock';
-  });
-  protected readonly stockClass = computed(() => {
-    const s = this.product().stock;
-    return s === 0 ? 'text-danger' : s <= 5 ? 'text-warning-emphasis' : 'text-success';
+    if (s === 0) return { text: 'Sold out', kind: 'danger' };
+    if (s <= 5) return { text: `Only ${s} left`, kind: 'warn' };
+    return null;
   });
 }
