@@ -34,8 +34,9 @@ model User {
   role         Role     @default(CUSTOMER)
   createdAt    DateTime @default(now()) @map("created_at")
 
-  cart   Cart?
-  orders Order[]
+  cart          Cart?
+  orders        Order[]
+  notifications Notification[]
 
   @@map("users")
 }
@@ -53,6 +54,7 @@ model Product {
   inventory  Inventory?
   cartItems  CartItem[]
   orderItems OrderItem[]
+  stockAlert StockAlert?
 
   // Serves the catalog filter (category) + price sort/range.
   @@index([category, priceCents])
@@ -141,4 +143,55 @@ model Payment {
 
   @@index([orderId])
   @@map("payments")
+}
+
+// ---------------------------------------------------------------- M5: event consumers
+
+// IDEMPOTENT CONSUMER ("inbox"): a consumer records every event it handled, IN THE SAME
+// TRANSACTION as its side effect. Delivery is at-least-once, so the same event can arrive twice
+// (crash before commit, rebalance, DLQ replay); the primary key makes the second one a no-op.
+model ProcessedEvent {
+  consumerGroup String   @map("consumer_group")
+  eventId       String   @map("event_id") @db.Uuid
+  processedAt   DateTime @default(now()) @map("processed_at")
+
+  @@id([consumerGroup, eventId])
+  @@map("processed_events")
+}
+
+// Written by the "notification" consumer group.
+model Notification {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  orderId   String?  @map("order_id") @db.Uuid
+  title     String
+  body      String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+// Written by the "inventory" consumer group: products that ran low after a sale (one row per product).
+model StockAlert {
+  productId   String   @id @map("product_id") @db.Uuid
+  available   Int
+  lastOrderId String?  @map("last_order_id") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("stock_alerts")
+}
+
+// Written by the "analytics" consumer group: a read model (projection) built purely from events.
+model SalesDaily {
+  day             DateTime @id @db.Date
+  confirmedOrders Int      @default(0) @map("confirmed_orders")
+  cancelledOrders Int      @default(0) @map("cancelled_orders")
+  // BigInt (64-bit): a day's revenue summed in cents passes the 32-bit limit at about Rs 2.1 crore.
+  revenueCents    BigInt   @default(0) @map("revenue_cents")
+
+  @@map("sales_daily")
 }
