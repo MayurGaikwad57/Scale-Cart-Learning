@@ -26,6 +26,9 @@ export interface KvClientOptions {
   maxConsecutiveTimeouts?: number;
   connectTimeoutMs?: number;
   log?: boolean;
+  /** Log prefix and what "down" means for the app - lets the same RESP client serve ScaleLog too. */
+  name?: string;
+  degradedNote?: string;
 }
 
 /**
@@ -62,7 +65,15 @@ export class KvClient {
   private readonly opts: Required<KvClientOptions>;
 
   constructor(opts: KvClientOptions = {}) {
-    this.opts = { commandTimeoutMs: 250, connectTimeoutMs: 1000, maxConsecutiveTimeouts: 3, log: true, ...opts };
+    this.opts = {
+      commandTimeoutMs: 250,
+      connectTimeoutMs: 1000,
+      maxConsecutiveTimeouts: 3,
+      log: true,
+      name: "kv",
+      degradedNote: "running without cache",
+      ...opts,
+    };
   }
 
   get isReady() {
@@ -114,9 +125,10 @@ export class KvClient {
     const prev = this.status;
     this.status = next;
     if (!this.opts.log) return;
-    if (next === "ready") console.log(`[kv] connected to ${this.host}:${this.port}`);
-    else if (next === "down" && prev !== "connecting") console.warn(`[kv] connection lost - running without cache, retrying in background`);
-    else if (next === "down") console.warn(`[kv] cannot reach ${this.host}:${this.port} - running without cache, retrying in background`);
+    const { name, degradedNote } = this.opts;
+    if (next === "ready") console.log(`[${name}] connected to ${this.host}:${this.port}`);
+    else if (next === "down" && prev !== "connecting") console.warn(`[${name}] connection lost - ${degradedNote}, retrying in background`);
+    else if (next === "down") console.warn(`[${name}] cannot reach ${this.host}:${this.port} - ${degradedNote}, retrying in background`);
   }
 
   private open() {
@@ -170,7 +182,7 @@ export class KvClient {
   private onTimeout(p: Pending, socket: net.Socket) {
     this.settle(p, new KvUnavailableError("kv command timed out"));
     if (++this.consecutiveTimeouts >= this.opts.maxConsecutiveTimeouts && socket === this.socket) {
-      if (this.opts.log) console.warn(`[kv] ${this.consecutiveTimeouts} timeouts in a row - treating ScaleKV as down`);
+      if (this.opts.log) console.warn(`[${this.opts.name}] ${this.consecutiveTimeouts} timeouts in a row - treating server as down`);
       this.consecutiveTimeouts = 0;
       socket.destroy(); // -> onClose: fails everything pending, status "down", reconnect with backoff
     }

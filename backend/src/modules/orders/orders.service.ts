@@ -2,6 +2,7 @@ import { z } from "zod";
 import { Prisma } from "../../../generated/prisma/client.js";
 import { prisma } from "../../config/prisma.js";
 import { badRequest, conflict, HttpError, notFound } from "../../utils/errors.js";
+import { publishOrderCreated } from "../../events/order-events.js";
 import { invalidateProducts } from "../products/products.cache.js";
 import { pageParams } from "../../utils/validation.js";
 import { PAYMENT_METHODS, paymentsService } from "../payments/payments.service.js";
@@ -80,7 +81,11 @@ export const ordersService = {
     // Stock was sold -> that product's cached page is stale. After commit, never inside the
     // transaction. A declined payment changed nothing in the end, so nothing to invalidate.
     if (result.sold) await invalidateProducts(result.productIds, { catalog: false });
-    return { order: await ordersService.getForUser(userId, result.orderId), replayed: result.replayed };
+    const order = await ordersService.getForUser(userId, result.orderId);
+    // Tell the rest of the system (notifications, inventory alerts, analytics) - see order-events.ts.
+    // Only for a NEW order: a replayed idempotent request already published its event.
+    if (!result.replayed) await publishOrderCreated(order, userId);
+    return { order, replayed: result.replayed };
   },
 
   /** The transaction itself (see create). */

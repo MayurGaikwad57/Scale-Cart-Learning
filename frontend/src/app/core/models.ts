@@ -112,3 +112,44 @@ export interface SystemStatus {
   cache: { hits: number; misses: number; bypass: number; hitRatePercent: number; productTtlSeconds: number; listTtlSeconds: number; categoriesTtlSeconds: number; notFoundTtlSeconds: number };
   rateLimits: { name: string; limit: number; window: string; per: string; appliesTo: string }[];
 }
+
+/** M5: written asynchronously by the "notification" consumer group. */
+export interface AppNotification {
+  id: string;
+  orderId: string | null;
+  title: string;
+  body: string;
+  read: boolean;
+  createdAt: string;
+}
+
+/** GET /admin/events - a look inside ScaleLog (our own Kafka). */
+export interface EventsOverview {
+  broker: { status: KvStatus; url: string | null };
+  cluster: {
+    topics: { name: string; partitions: { partition: number; endOffset: number }[] }[];
+    groups: {
+      group: string;
+      topic: string;
+      generation: number;
+      members: { id: string; partitions: number[]; lastSeenMsAgo: number }[];
+      partitions: { partition: number; committed: number; endOffset: number; lag: number }[];
+    }[];
+    stats: { produced: number; fetchedRecords: number; commits: number; rebalances: number };
+  } | null;
+  publisher: { published: number; notPublished: number; lastError: string | null };
+  localConsumers: { group: string; memberId: string; generation: number; partitions: number[]; processed: number; retries: number; deadLettered: number; rebalances: number; lastError: string | null }[];
+  chaos: Record<string, boolean>;
+  chaosAvailable: boolean;
+}
+
+export interface DlqView {
+  topic: string;
+  total: number;
+  waiting: { offset: number; eventId: string; type: string; orderId: string; error: string; attempts: number; failedAt: string }[];
+}
+
+export interface Projections {
+  sales: { day: string; confirmedOrders: number; cancelledOrders: number; revenueCents: number }[];
+  stockAlerts: { productId: string; name: string; sku: string; available: number; updatedAt: string }[];
+}

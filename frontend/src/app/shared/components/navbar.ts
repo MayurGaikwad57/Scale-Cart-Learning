@@ -1,12 +1,14 @@
+import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, ElementRef, HostListener, inject, signal } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import { CartService } from '../../core/services/cart.service';
+import { NotificationsService } from '../../core/services/notifications.service';
 import { Icon } from './icon';
 
 @Component({
   selector: 'app-navbar',
-  imports: [RouterLink, RouterLinkActive, Icon],
+  imports: [RouterLink, RouterLinkActive, Icon, DatePipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <header class="sc-nav">
@@ -29,6 +31,32 @@ import { Icon } from './icon';
         <div class="sc-nav-spacer"></div>
 
         @if (auth.user(); as user) {
+          <!-- Notifications: written asynchronously by the "notification" consumer group (M5). -->
+          <div class="sc-menu-wrap">
+            <button class="sc-iconbtn" type="button" aria-haspopup="true" [attr.aria-expanded]="notifOpen()"
+              [attr.aria-label]="notes.unread() ? 'Notifications, ' + notes.unread() + ' unread' : 'Notifications'"
+              (click)="toggleNotifications()">
+              <app-icon name="bell" [size]="22" />
+              @if (notes.unread() > 0) { <span class="sc-cart-badge" data-testid="notif-count">{{ notes.unread() }}</span> }
+            </button>
+            @if (notifOpen()) {
+              <div class="sc-menu sc-notif-menu" role="dialog" aria-label="Notifications">
+                <div class="sc-menu-head fw-semibold">Notifications</div>
+                @for (n of notes.items(); track n.id) {
+                  <a class="sc-notif" [class.unread]="!n.read" [routerLink]="n.orderId ? ['/orders', n.orderId] : null" (click)="closeAll()">
+                    <span class="sc-notif-dot" [class.danger]="n.title === 'Payment declined'"></span>
+                    <span>
+                      <b class="d-block">{{ n.title }}</b>
+                      <span class="small">{{ n.body }}</span>
+                      <span class="d-block sc-muted small mt-1">{{ n.createdAt | date: 'MMM d, h:mm a' }}</span>
+                    </span>
+                  </a>
+                } @empty {
+                  <div class="sc-muted small p-3 text-center">No notifications yet. Place an order and one will arrive here.</div>
+                }
+              </div>
+            }
+          </div>
           <a class="sc-iconbtn" routerLink="/cart" aria-label="Cart" (click)="closeAll()">
             <app-icon name="cart" [size]="22" />
             @if (cart.count() > 0) {
@@ -38,7 +66,7 @@ import { Icon } from './icon';
           <!-- Local component state: is the account menu open? Only this component cares, so a plain signal. -->
           <div class="sc-menu-wrap ms-1">
             <button class="sc-avatar" type="button" aria-haspopup="menu" [attr.aria-expanded]="menuOpen()" aria-label="Account menu"
-              (click)="menuOpen.set(!menuOpen()); mobileOpen.set(false)">{{ user.email.charAt(0) }}</button>
+              (click)="menuOpen.set(!menuOpen()); mobileOpen.set(false); notifOpen.set(false)">{{ user.email.charAt(0) }}</button>
             @if (menuOpen()) {
               <div class="sc-menu" role="menu">
                 <div class="sc-menu-head">
@@ -50,6 +78,7 @@ import { Icon } from './icon';
                 @if (auth.isAdmin()) {
                   <a class="sc-menu-item" role="menuitem" routerLink="/admin" (click)="closeAll()"><app-icon name="grid" [size]="18" /> Manage products</a>
                   <a class="sc-menu-item" role="menuitem" routerLink="/admin/system" (click)="closeAll()"><app-icon name="zap" [size]="18" /> System status</a>
+                  <a class="sc-menu-item" role="menuitem" routerLink="/admin/events" (click)="closeAll()"><app-icon name="activity" [size]="18" /> Events</a>
                 }
                 <button class="sc-menu-item" role="menuitem" type="button" (click)="logout()"><app-icon name="logout" [size]="18" /> Log out</button>
               </div>
@@ -80,15 +109,29 @@ import { Icon } from './icon';
 export class Navbar {
   protected readonly auth = inject(AuthService);
   protected readonly cart = inject(CartService);
+  protected readonly notes = inject(NotificationsService);
   private readonly router = inject(Router);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
   protected readonly menuOpen = signal(false);
   protected readonly mobileOpen = signal(false);
+  protected readonly notifOpen = signal(false);
 
   protected closeAll(): void {
     this.menuOpen.set(false);
     this.mobileOpen.set(false);
+    this.notifOpen.set(false);
+  }
+
+  /** Opening the list shows the latest and marks everything read (the badge resets). */
+  protected toggleNotifications(): void {
+    const open = !this.notifOpen();
+    this.closeAll();
+    this.notifOpen.set(open);
+    if (open) {
+      this.notes.refresh();
+      if (this.notes.unread() > 0) this.notes.markAllRead().subscribe({ error: () => undefined });
+    }
   }
 
   protected logout(): void {

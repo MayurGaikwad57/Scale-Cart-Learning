@@ -4,19 +4,26 @@
  *
  * Type commands like:  PING · SET greeting hello EX 30 · GET greeting · TTL greeting
  *                      KEYS * · INFO · DBSIZE
+ *
+ * With --log it talks to the ScaleLog broker instead (npm run log:cli), e.g.
+ *                      DESCRIBE · FETCH orders 0 0 10 · COMMITTED notification orders
  */
 import "dotenv/config";
 import readline from "node:readline";
 import { KvClient } from "./client.js";
 import { RespError, SimpleString, type Reply } from "./resp.js";
 
-const url = process.env.KV_URL ?? `kv://127.0.0.1:${process.env.KV_PORT ?? 6380}`;
+const useLog = process.argv.includes("--log");
+const url = useLog
+  ? (process.env.LOG_URL ?? `kv://127.0.0.1:${process.env.LOG_PORT ?? 9093}`)
+  : (process.env.KV_URL ?? `kv://127.0.0.1:${process.env.KV_PORT ?? 6380}`);
+const label = useLog ? "scalelog" : "scalekv";
 const client = new KvClient({ log: false, commandTimeoutMs: 5000 });
 client.connect(url);
 try {
   await client.waitUntilReady(2000);
 } catch {
-  console.error(`Could not connect to ScaleKV at ${url}. Start it with: npm run kv`);
+  console.error(`Could not connect to ${label} at ${url}. Start it with: npm run ${useLog ? "log" : "kv"}`);
   process.exit(1);
 }
 
@@ -41,12 +48,12 @@ async function run(args: string[]) {
   }
 }
 
-const oneShot = process.argv.slice(2);
+const oneShot = process.argv.slice(2).filter((a) => a !== "--log");
 if (oneShot.length) {
   await run(oneShot);
   await client.disconnect();
 } else {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: `scalekv ${url.replace("kv://", "")}> ` });
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: `${label} ${url.replace("kv://", "")}> ` });
   rl.prompt();
   rl.on("line", async (line) => {
     const args = tokenize(line.trim());

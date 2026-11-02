@@ -13,6 +13,10 @@ const schema = z.object({
   // to trust X-Forwarded-For - then every user would share one rate-limit bucket. Set it to the
   // number of proxy hops (e.g. "1") or a subnet. Leave unset when clients connect directly.
   TRUST_PROXY: z.string().optional(),
+  // e.g. kv://127.0.0.1:9093 - the ScaleLog broker (our Kafka). Optional: unset = no events.
+  LOG_URL: z.string().optional(),
+  // Run the event consumers inside the API process too ("false" = only in `npm run worker`).
+  RUN_WORKERS: z.enum(["true", "false"]).default("true"),
 });
 
 // Fail fast at boot with a readable message instead of failing later at first use.
