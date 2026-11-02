@@ -1,21 +1,25 @@
 import type { Request, Response } from "express";
+import type { Cached } from "../../lib/cache.js";
 import { idParams } from "../../utils/validation.js";
 import { productsService } from "./products.service.js";
 import { listQuerySchema } from "./products.validation.js";
 
 const isAdmin = (req: Request) => req.user?.role === "ADMIN";
 
+// X-Cache: HIT | MISS | BYPASS - open the browser's Network tab to watch the cache work.
+const send = <T>(res: Response, r: Cached<T>) => res.set("X-Cache", r.cache).json(r.data);
+
 export const productsController = {
   // Express 5 makes req.query read-only, so the query is parsed here instead of in middleware.
   async list(req: Request, res: Response) {
-    res.json(await productsService.list(listQuerySchema.parse(req.query), isAdmin(req)));
+    send(res, await productsService.list(listQuerySchema.parse(req.query), isAdmin(req)));
   },
   async categories(_req: Request, res: Response) {
-    res.json(await productsService.categories());
+    send(res, await productsService.categories());
   },
   async get(req: Request, res: Response) {
     const { id } = idParams.parse(req.params);
-    res.json(await productsService.get(id, isAdmin(req)));
+    send(res, await productsService.get(id, isAdmin(req)));
   },
   async create(req: Request, res: Response) {
     res.status(201).json(await productsService.create(req.body));

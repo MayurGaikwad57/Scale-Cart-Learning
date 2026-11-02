@@ -4,6 +4,8 @@
   "main": "dist/src/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "kv": "tsx src/kv/kv-server.ts",
+    "kv:cli": "tsx src/kv/kv-cli.ts",
     "build": "prisma generate && tsc",
     "start": "node dist/src/server.js",
     "test": "vitest run",

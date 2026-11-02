@@ -49,6 +49,7 @@ import { Icon } from './icon';
                 <a class="sc-menu-item" role="menuitem" routerLink="/cart" (click)="closeAll()"><app-icon name="cart" [size]="18" /> Cart</a>
                 @if (auth.isAdmin()) {
                   <a class="sc-menu-item" role="menuitem" routerLink="/admin" (click)="closeAll()"><app-icon name="grid" [size]="18" /> Manage products</a>
+                  <a class="sc-menu-item" role="menuitem" routerLink="/admin/system" (click)="closeAll()"><app-icon name="zap" [size]="18" /> System status</a>
                 }
                 <button class="sc-menu-item" role="menuitem" type="button" (click)="logout()"><app-icon name="logout" [size]="18" /> Log out</button>
               </div>

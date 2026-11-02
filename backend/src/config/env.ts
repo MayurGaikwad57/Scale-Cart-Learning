@@ -7,6 +7,8 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(16),
   CORS_ORIGIN: z.string().default("http://localhost:4300"),
+  // e.g. kv://127.0.0.1:6380 - our own Redis-like store. Optional: unset = run without it.
+  KV_URL: z.string().optional(),
 });
 
 // Fail fast at boot with a readable message instead of failing later at first use.
