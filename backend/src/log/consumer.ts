@@ -128,7 +128,11 @@ export class Consumer {
   }
 
   private apply(a: Assignment) {
-    if (a.generation === this.generation) return;
+    // Compare the PARTITIONS too, not just the generation number: the broker keeps generations in
+    // memory, so after a broker restart they start again at 1 and an old number can come back with
+    // a different assignment (found in code review).
+    const same = a.generation === this.generation && a.partitions.join(",") === this.partitions.join(",");
+    if (same) return;
     const kept = new Set(a.partitions);
     // Forget positions of partitions we lost; for those we keep, the committed offset is re-read
     // (another member may have processed them while we didn't own them).
@@ -191,8 +195,10 @@ export class Consumer {
       } catch (e) {
         if (FENCED.has(brokerErrorCode(e) ?? "")) {
           // We were fenced: the new owner will process this event again (that's the duplicate
-          // that at-least-once delivery warns about - handlers are idempotent).
+          // that at-least-once delivery warns about - handlers are idempotent). Ask the broker for
+          // our CURRENT assignment right away instead of retrying a partition we don't own.
           this.positions.delete(p);
+          await this.heartbeat();
           return true;
         }
         throw e;

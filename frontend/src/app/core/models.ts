@@ -146,7 +146,8 @@ export interface EventsOverview {
 export interface DlqView {
   topic: string;
   total: number;
-  waiting: { offset: number; eventId: string; type: string; orderId: string; error: string; attempts: number; failedAt: string }[];
+  // eventId/type/orderId are missing for an unreadable or malformed record - exactly what DLQs collect.
+  waiting: { offset: number; eventId?: string; type?: string; orderId?: string; error: string; attempts: number; failedAt: string }[];
 }
 
 export interface Projections {

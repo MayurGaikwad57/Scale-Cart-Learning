@@ -98,7 +98,7 @@ write the event into an `outbox` table in the *same* transaction as the order, a
 
 ## 5. Verification
 
-- **Backend: 91 tests** (70 before + 21 new). The broker and storage tests cover offsets, restart, torn writes, hashing, range
+- **Backend: 97 tests** (70 before + 27 new, incl. the review fixes in section 6). The broker and storage tests cover offsets, restart, torn writes, hashing, range
   assignment, expiry, fencing, offsets after restart, and admin reset. The consumer tests over TCP cover order, retry,
   DLQ, rebalancing, crash before commit (redelivery), and the zombie commit. The end-to-end tests do a real checkout → three groups →
   PostgreSQL, plus a duplicate, chaos → DLQ → replay, the admin view, and the broker being down. **Mutation-checked:** removing
@@ -109,7 +109,25 @@ write the event into an `outbox` table in the *same* transaction as the order, a
   → replay → notification delivered; phone layouts. The phone run caught a real bug (the dropdown was cut off on the left,
   which a "no horizontal scroll" check couldn't see). It was fixed and the check now measures the panel's position.
 
-## 6. Interview questions
+## 6. Found in code review (PR #2) and fixed
+
+These are worth knowing: each one is a classic distributed-systems mistake.
+
+| Bug | Why it happened | Fix |
+|---|---|---|
+| A record written but **missing its newline** (crash between `}` and the newline) was kept, so the next record got glued onto it and both were lost on the next restart | Recovery assumed every parsed line had a newline | A line without its newline is an unfinished write and is always dropped |
+| After a **broker restart** a consumer could keep stale partitions and spin | Generations live in broker memory and restart at 1; the consumer compared only the number | Compare the partition list too; after a fenced commit, heartbeat at once to fetch the real assignment |
+| `once()` treated **any** unique violation as "already processed", so a real failure was silently committed (the event was lost) | Error codes are not error *sources* | Only the marker insert may mean "duplicate"; everything else is retried or dead-lettered |
+| One **non-JSON record in a DLQ** broke the admin view of that queue | The DLQ is exactly where unreadable records go | Parse each record defensively; show "unreadable" |
+| `COMMIT`/`SETOFFSET abc` stored `NaN` as an offset | `NaN < 0` is false, so range checks don't catch it | Whole-number validation on every numeric argument |
+| Checkout **waited for the broker** (a stalled broker could add 3–9 s) | The publish was awaited although the order was already committed | Publish in the background; failures are still counted |
+| Daily revenue in a 32-bit column | It overflows at about ₹2.1 crore/day | `BIGINT` (migration) |
+| Opening the bell could mark an **unseen** notification read | Read-all raced with the list load | Load the list first, then mark the shown IDs only |
+| API restarts left consumers registered for 10 s | No shutdown handler in the API | `SIGINT`/`SIGTERM` → consumers `LEAVE` |
+
+Each fix has a test that fails when the fix is reverted (backend 97 tests, frontend 22).
+
+## 7. Interview questions
 
 1. **Kafka vs a queue (RabbitMQ/SQS): what changes when consuming doesn't delete?** *Hint:* many independent groups, replay, offsets instead of acks.
 2. **How does Kafka keep events of one order in order, and what does that cost?** *Hint:* key → partition; no global order; partitions cap parallelism.

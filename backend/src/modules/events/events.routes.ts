@@ -63,7 +63,14 @@ eventsRouter.get("/dlq/:group", async (req, res) => {
     topic: s.topic,
     total: s.endOffset,
     waiting: s.waiting.map((r) => {
-      const event = JSON.parse(r.value) as { eventId?: string; type?: string; data?: { orderId?: string } };
+      // The DLQ is exactly where UNREADABLE records end up (a non-JSON "poison" record is
+      // dead-lettered on purpose), so one bad record must not hide the whole queue (found in code review).
+      let event: { eventId?: string; type?: string; data?: { orderId?: string } } = {};
+      try {
+        event = JSON.parse(r.value) as typeof event;
+      } catch {
+        event = { type: "unreadable (not JSON)" };
+      }
       return {
         offset: r.offset,
         eventId: event.eventId,
@@ -105,7 +112,8 @@ eventsRouter.get("/projections", async (_req, res) => {
     }),
   ]);
   res.json({
-    sales: sales.map((s) => ({ ...s, day: s.day.toISOString().slice(0, 10) })),
+    // revenueCents is a BigInt in the DB; JSON has no BigInt (Number is exact up to 2^53 cents).
+    sales: sales.map((s) => ({ ...s, day: s.day.toISOString().slice(0, 10), revenueCents: Number(s.revenueCents) })),
     stockAlerts: alerts.map((a) => ({ productId: a.productId, name: a.product.name, sku: a.product.sku, available: a.available, updatedAt: a.updatedAt })),
   });
 });

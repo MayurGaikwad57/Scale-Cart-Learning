@@ -84,7 +84,10 @@ export const ordersService = {
     const order = await ordersService.getForUser(userId, result.orderId);
     // Tell the rest of the system (notifications, inventory alerts, analytics) - see order-events.ts.
     // Only for a NEW order: a replayed idempotent request already published its event.
-    if (!result.replayed) await publishOrderCreated(order, userId);
+    // NOT awaited: the order is committed, so the customer's answer must not wait for the broker
+    // (a stalled broker could add seconds per checkout - found in code review). publishOrderCreated
+    // never throws; failures are counted in publisherStats.
+    if (!result.replayed) void publishOrderCreated(order, userId);
     return { order, replayed: result.replayed };
   },
 

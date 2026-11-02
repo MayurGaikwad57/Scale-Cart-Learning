@@ -190,7 +190,8 @@ model SalesDaily {
   day             DateTime @id @db.Date
   confirmedOrders Int      @default(0) @map("confirmed_orders")
   cancelledOrders Int      @default(0) @map("cancelled_orders")
-  revenueCents    Int      @default(0) @map("revenue_cents")
+  // BigInt (64-bit): a day's revenue summed in cents passes the 32-bit limit at about Rs 2.1 crore.
+  revenueCents    BigInt   @default(0) @map("revenue_cents")
 
   @@map("sales_daily")
 }

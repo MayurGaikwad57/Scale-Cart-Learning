@@ -161,7 +161,10 @@ interface Snapshot {
                     </div>
                     @for (w of dlq?.waiting ?? []; track w.offset) {
                       <div class="sc-dlq-item small">
-                        <div>Order <code>#{{ w.orderId.slice(0, 8).toUpperCase() }}</code> · {{ w.attempts }} attempts</div>
+                        <div>
+                          @if (w.orderId) { Order <code>#{{ w.orderId.slice(0, 8).toUpperCase() }}</code> } @else { {{ w.type || 'Unknown event' }} }
+                          · {{ w.attempts }} attempts
+                        </div>
                         <div class="sc-danger-text">{{ w.error }}</div>
                       </div>
                     }

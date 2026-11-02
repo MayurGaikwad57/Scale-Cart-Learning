@@ -39,6 +39,21 @@ describe("PartitionLog (an append-only file)", () => {
     b.close();
     expect(new PartitionLog(file).read(0, 10).map((r) => r.value)).toEqual(["ok", "next"]);
   });
+
+  it("drops a complete-looking record whose newline never made it to disk (no glued records)", () => {
+    const file = path.join(tmpDir(), "t-0.log");
+    const a = new PartitionLog(file);
+    a.append({ key: "k", value: "ok", headers: {} });
+    a.close();
+    // Crash exactly between '}' and the newline: valid JSON, but the write never finished.
+    fs.appendFileSync(file, JSON.stringify({ offset: 1, timestamp: 1, key: "k", value: "unacked", headers: {} }));
+    const b = new PartitionLog(file);
+    expect(b.endOffset).toBe(1);
+    b.append({ key: "k", value: "next", headers: {} });
+    b.close();
+    // Before the fix, "next" was glued onto the unterminated line and BOTH were lost on restart.
+    expect(new PartitionLog(file).read(0, 10).map((r) => r.value)).toEqual(["ok", "next"]);
+  });
 });
 
 describe("Broker (topics, partitions, groups, offsets)", () => {
@@ -127,6 +142,19 @@ describe("Broker (topics, partitions, groups, offsets)", () => {
     expect(parse<{ topics: { name: string }[] }>(restarted.execute(["DESCRIBE"])).topics.map((t) => t.name)).toEqual(["orders"]);
   });
 
+  it("rejects offsets / partitions / generations that are not whole numbers", () => {
+    const b = make();
+    b.execute(["CREATETOPIC", "t", "1"]);
+    b.execute(["PRODUCE", "t", "k", "v"]);
+    const a = parse<Assign>(b.execute(["JOIN", "g", "t", "m"]));
+    const code = (r: unknown) => (r as RespError).message.split(" ")[0];
+    expect(code(b.execute(["COMMIT", "g", "t", "0", "abc", "m", String(a.generation)]))).toBe("INVALID_ARGUMENT");
+    expect(code(b.execute(["FETCH", "t", "x", "0", "10"]))).toBe("INVALID_ARGUMENT");
+    b.execute(["LEAVE", "g", "m"]);
+    expect(code(b.execute(["SETOFFSET", "g", "t", "0", "abc"]))).toBe("INVALID_ARGUMENT");
+    expect(parse<Record<string, number | null>>(b.execute(["COMMITTED", "g", "t"]))[0]).toBeNull(); // nothing stored
+  });
+
   it("only lets an admin reset offsets of an idle group", () => {
     const b = make();
     b.execute(["CREATETOPIC", "t", "1"]);
@@ -135,6 +163,29 @@ describe("Broker (topics, partitions, groups, offsets)", () => {
     expect((b.execute(["SETOFFSET", "g", "t", "0", "1"]) as RespError).message).toMatch(/^GROUP_ACTIVE/);
     b.execute(["LEAVE", "g", "m"]);
     expect(b.execute(["SETOFFSET", "g", "t", "0", "1"])).toMatchObject({ value: "OK" });
+  });
+});
+
+describe("Consumer assignment handling", () => {
+  it("adopts a new assignment even when the generation NUMBER repeats (broker restarted)", async () => {
+    // A stub broker: the member first gets [0] at generation 3; after a "broker restart"
+    // generations start over and reach 3 again, but with partition [1].
+    let assignment = { generation: 3, partitions: [0], members: 2 };
+    const stub = {
+      isReady: true,
+      createTopic: async () => 3,
+      join: async () => assignment,
+      heartbeat: async () => assignment,
+      committed: async () => ({}),
+      fetch: async () => ({ records: [], endOffset: 0 }),
+      leave: async () => undefined,
+    } as unknown as LogClient;
+    const c = new Consumer({ client: stub, group: "g", topic: "orders", handle: async () => undefined, log: false, pollIdleMs: 10, heartbeatMs: 20 });
+    c.start();
+    await expect.poll(() => c.partitions.join(",")).toBe("0");
+    assignment = { generation: 3, partitions: [1], members: 2 };
+    await expect.poll(() => c.partitions.join(","), { timeout: 2000 }).toBe("1");
+    await c.stop();
   });
 });
 

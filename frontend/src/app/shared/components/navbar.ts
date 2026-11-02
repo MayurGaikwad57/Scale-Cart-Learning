@@ -128,10 +128,7 @@ export class Navbar {
     const open = !this.notifOpen();
     this.closeAll();
     this.notifOpen.set(open);
-    if (open) {
-      this.notes.refresh();
-      if (this.notes.unread() > 0) this.notes.markAllRead().subscribe({ error: () => undefined });
-    }
+    if (open) this.notes.open().subscribe({ error: () => undefined });
   }
 
   protected logout(): void {

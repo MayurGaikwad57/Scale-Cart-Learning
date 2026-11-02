@@ -52,18 +52,23 @@ export class PartitionLog {
   private load() {
     if (!fs.existsSync(this.file)) return;
     const text = fs.readFileSync(this.file, "utf8");
+    // Every complete record ends with a newline. split() leaves whatever follows the LAST newline
+    // as the final element: that tail was never fully written (no newline = the write didn't
+    // finish, so it was never fsync'ed or acknowledged) - even if it happens to be valid JSON, it
+    // is dropped. Otherwise the next append would be glued onto it: '}{...}' (found in code review).
+    const lines = text.split("\n");
+    lines.pop(); // the unterminated tail ("" when the file ends cleanly with a newline)
     let validBytes = 0;
-    for (const line of text.split("\n")) {
-      if (line === "") continue;
+    for (const line of lines) {
       let rec: LogRecord;
       try {
         rec = JSON.parse(line) as LogRecord;
       } catch {
-        break; // torn last record
+        break; // corrupted record: keep everything before it
       }
-      if (rec.offset !== this.records.length) break; // corrupted / out of order: stop here
+      if (rec.offset !== this.records.length) break; // out of order: stop here
       this.records.push(rec);
-      validBytes += Buffer.byteLength(line) + 1;
+      validBytes += Buffer.byteLength(line) + 1; // + the newline that really is there
     }
     if (validBytes < Buffer.byteLength(text)) {
       console.warn(`[scalelog] ${path.basename(this.file)}: dropped ${Buffer.byteLength(text) - validBytes} bytes of a torn write`);

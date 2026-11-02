@@ -1,12 +1,15 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { Prisma } from "../generated/prisma/client.js";
 import { createApp } from "./app.js";
 import { broker } from "./config/broker.js";
 import { kv } from "./config/kv.js";
 import { prisma } from "./config/prisma.js";
+import { once } from "./events/handlers.js";
 import { publisherStats } from "./events/order-events.js";
 import { startWorkers, stopWorkers } from "./events/workers.js";
 import { startKvServer, type RunningKvServer } from "./kv/server.js";
@@ -23,8 +26,12 @@ let admin: Awaited<ReturnType<typeof makeUser>>;
 type U = Awaited<ReturnType<typeof makeUser>>;
 
 const today = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00.000Z");
-let salesBefore: { confirmedOrders: number; cancelledOrders: number; revenueCents: number } | null;
-const sales = () => prisma.salesDaily.findUnique({ where: { day: today } });
+let salesBefore: Awaited<ReturnType<typeof sales>>;
+// revenueCents is a BigInt column; compare as plain numbers in the tests.
+const sales = async () => {
+  const row = await prisma.salesDaily.findUnique({ where: { day: today } });
+  return row && { ...row, revenueCents: Number(row.revenueCents) };
+};
 const eventIds: string[] = [];
 async function collectEventIds() {
   for (const p of [0, 1, 2]) {
@@ -148,6 +155,51 @@ describe("delivery guarantees", () => {
     for (const g of ["notification", "inventory", "analytics"]) await expect.poll(() => lag(g), { timeout: 10_000 }).toBe(0);
     expect((await sales())!.revenueCents).toBe(revenueBefore + 700);
   }, 40_000);
+});
+
+describe("code-review fixes", () => {
+  it("once(): a unique violation inside the WORK is a real failure, not a 'duplicate'", async () => {
+    const marker = randomUUID();
+    eventIds.push(marker); // cleaned up in afterAll
+    const work = (tx: Prisma.TransactionClient) =>
+      tx.processedEvent.create({ data: { consumerGroup: "review-test", eventId: marker } }).then(() => undefined);
+    const [first, second] = [randomUUID(), randomUUID()];
+    eventIds.push(first, second); // every marker this test writes must be cleaned up
+    expect(await once("review-test-a", first, work)).toBe("done");
+    // Same work again: its OWN insert now conflicts. Must throw (-> retry/DLQ), not report "duplicate".
+    await expect(once("review-test-b", second, work)).rejects.toMatchObject({ code: "P2002" });
+    // The marker insert failing for any OTHER reason (here: PostgreSQL rejects a malformed uuid)
+    // is a real error too - it must never be reported as "already processed".
+    await expect(once("review-test-d", "not-a-uuid", async () => undefined)).rejects.toBeDefined();
+    // A real redelivery is still recognised as a duplicate.
+    const id = randomUUID();
+    eventIds.push(id);
+    expect(await once("review-test-c", id, async () => undefined)).toBe("done");
+    expect(await once("review-test-c", id, async () => undefined)).toBe("duplicate");
+  });
+
+  it("an unreadable (non-JSON) DLQ record doesn't hide the queue", async () => {
+    const topic = "orders.notification.dlq";
+    await broker.createTopic(topic, 1);
+    await broker.produce(topic, "k", "this is not json", { "x-error": "cannot parse", "x-attempts": "3" });
+    const res = await request(app).get("/admin/events/dlq/notification").set(admin.auth);
+    expect(res.status).toBe(200);
+    expect(res.body.waiting.at(-1)).toMatchObject({ type: "unreadable (not JSON)", error: "cannot parse", attempts: 3 });
+    // Admin "skip": move the replayer's offset past it instead of replaying garbage.
+    const { endOffset } = await broker.fetch(topic, 0, 0, 1);
+    await broker.setOffset("replay.notification", topic, 0, endOffset);
+    expect((await request(app).get("/admin/events/dlq/notification").set(admin.auth)).body.waiting).toHaveLength(0);
+  });
+
+  it("marks only the notifications the user actually saw", async () => {
+    const u = await makeUser();
+    const [seen, unseen] = await Promise.all(
+      ["seen", "arrived later"].map((title) => prisma.notification.create({ data: { userId: u.user.id, title, body: "-" } })),
+    );
+    const res = await request(app).post("/notifications/read").set(u.auth).send({ ids: [seen.id] });
+    expect(res.body.unread).toBe(1);
+    expect((await prisma.notification.findUniqueOrThrow({ where: { id: unseen.id } })).read).toBe(false);
+  });
 });
 
 describe("admin view", () => {

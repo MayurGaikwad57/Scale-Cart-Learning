@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { DestroyRef, Injectable, effect, inject, signal, untracked } from '@angular/core';
-import { Observable, tap } from 'rxjs';
+import { Observable, map, of, switchMap, tap } from 'rxjs';
 import { AuthService } from '../auth/auth.service';
 import { API_URL } from '../config';
 import { AppNotification } from '../models';
@@ -49,10 +49,25 @@ export class NotificationsService {
     });
   }
 
-  markAllRead(): Observable<void> {
-    return this.http.post<void>(`${API_URL}/notifications/read-all`, {}).pipe(
-      // Only the badge resets now; the open list keeps highlighting what was new until the next refresh.
-      tap(() => this.unread.set(0)),
+  /**
+   * The bell was opened: load the latest list FIRST, then mark exactly the unread ones that are
+   * now on screen. (Firing "read-all" in parallel could mark a notification the user never saw,
+   * and a late GET could bring the old badge back - found in code review.)
+   * The open list keeps highlighting what was new; only the badge count changes.
+   */
+  open(): Observable<void> {
+    return this.http.get<{ items: AppNotification[]; unread: number }>(`${API_URL}/notifications`).pipe(
+      tap((r) => {
+        this.items.set(r.items);
+        this.unread.set(r.unread);
+      }),
+      switchMap((r) => {
+        const shown = r.items.filter((n) => !n.read).map((n) => n.id);
+        if (shown.length === 0) return of(undefined);
+        return this.http
+          .post<{ unread: number }>(`${API_URL}/notifications/read`, { ids: shown })
+          .pipe(map((res) => void this.unread.set(res.unread)));
+      }),
     );
   }
 }

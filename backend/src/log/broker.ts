@@ -284,6 +284,10 @@ export class Broker {
     const a = argv.slice(1);
     const int = (s: string | undefined) => (s !== undefined && /^-?\d+$/.test(s) ? Number(s) : NaN);
     const need = (n: number) => (a.length < n ? err("ERR", `wrong number of arguments for '${cmd.toLowerCase()}'`) : null);
+    // Partition / offset / generation arguments must be whole numbers. Without this, "abc" became
+    // NaN, slipped past range checks (NaN < 0 is false) and was stored as an offset (found in code review).
+    const ints = (...idx: number[]) =>
+      idx.some((i) => !Number.isSafeInteger(int(a[i]))) ? err("INVALID_ARGUMENT", "partition/offset/generation must be whole numbers") : null;
 
     switch (cmd) {
       case "PING":
@@ -311,7 +315,7 @@ export class Broker {
         return this.produce(a[0], a[1], a[2], headers);
       }
       case "FETCH": // FETCH topic partition offset max
-        return need(4) ?? this.fetch(a[0], int(a[1]), int(a[2]), int(a[3]));
+        return need(4) ?? ints(1, 2, 3) ?? this.fetch(a[0], int(a[1]), int(a[2]), int(a[3]));
       case "JOIN": // JOIN group topic memberId
         return need(3) ?? this.join(a[0], a[1], a[2]);
       case "HEARTBEAT": // HEARTBEAT group memberId
@@ -319,11 +323,11 @@ export class Broker {
       case "LEAVE":
         return need(2) ?? this.leave(a[0], a[1]);
       case "COMMIT": // COMMIT group topic partition offset memberId generation
-        return need(6) ?? this.commit(a[0], a[1], int(a[2]), int(a[3]), a[4], int(a[5]));
+        return need(6) ?? ints(2, 3, 5) ?? this.commit(a[0], a[1], int(a[2]), int(a[3]), a[4], int(a[5]));
       case "COMMITTED": // COMMITTED group topic
         return need(2) ?? this.committed(a[0], a[1]);
       case "SETOFFSET": // SETOFFSET group topic partition offset
-        return need(4) ?? this.setOffset(a[0], a[1], int(a[2]), int(a[3]));
+        return need(4) ?? ints(2, 3) ?? this.setOffset(a[0], a[1], int(a[2]), int(a[3]));
       case "DESCRIBE":
         return this.describe();
       default:

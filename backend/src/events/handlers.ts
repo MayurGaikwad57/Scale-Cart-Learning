@@ -16,15 +16,25 @@ export const LOW_STOCK_THRESHOLD = 5;
  *   - the work throws -> both roll back -> the retry starts clean.
  * This turns at-least-once DELIVERY into exactly-once EFFECT (for effects inside our database).
  */
+class AlreadyProcessed extends Error {}
+
 export async function once(group: string, eventId: string, work: (tx: Prisma.TransactionClient) => Promise<void>): Promise<"done" | "duplicate"> {
   try {
     await prisma.$transaction(async (tx) => {
-      await tx.processedEvent.create({ data: { consumerGroup: group, eventId } });
+      try {
+        await tx.processedEvent.create({ data: { consumerGroup: group, eventId } });
+      } catch (e) {
+        // ONLY a conflict on the marker itself means "already processed". A unique violation
+        // raised by `work` is a real failure and must be retried / dead-lettered, never silently
+        // swallowed as a duplicate (found in code review).
+        if ((e as { code?: string }).code === "P2002") throw new AlreadyProcessed();
+        throw e;
+      }
       await work(tx);
     });
     return "done";
   } catch (e) {
-    if ((e as { code?: string }).code === "P2002") return "duplicate"; // already processed
+    if (e instanceof AlreadyProcessed) return "duplicate";
     throw e;
   }
 }
@@ -81,10 +91,10 @@ export async function analyticsHandler(e: OrderCreated) {
         day,
         confirmedOrders: confirmed ? 1 : 0,
         cancelledOrders: confirmed ? 0 : 1,
-        revenueCents: confirmed ? e.data.totalCents : 0,
+        revenueCents: BigInt(confirmed ? e.data.totalCents : 0),
       },
       update: confirmed
-        ? { confirmedOrders: { increment: 1 }, revenueCents: { increment: e.data.totalCents } }
+        ? { confirmedOrders: { increment: 1 }, revenueCents: { increment: BigInt(e.data.totalCents) } }
         : { cancelledOrders: { increment: 1 } },
     });
   });
