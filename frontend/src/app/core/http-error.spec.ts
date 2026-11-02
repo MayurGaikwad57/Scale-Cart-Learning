@@ -20,6 +20,11 @@ describe('errorMessage', () => {
     const msg = errorMessage(http(400, { error: 'validation_failed', details: [{ path: 'email', message: 'Invalid email' }] }));
     expect(msg).toBe('email: Invalid email');
   });
+  it('tells the user how long to wait when rate limited (429)', () => {
+    const msg = errorMessage(http(429, { error: 'too_many_requests', message: 'Too many requests. Please try again in 42 seconds.' }));
+    expect(msg).toContain('42 seconds');
+    expect(errorMessage(http(429, null))).toContain('wait');
+  });
   it('never leaks non-HTTP errors', () => {
     expect(errorMessage(new Error('boom: secret'))).toBe('Something went wrong. Please try again.');
   });
