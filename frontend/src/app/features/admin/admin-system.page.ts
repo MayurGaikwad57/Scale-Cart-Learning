@@ -25,7 +25,10 @@ const REFRESH_MS = 3000;
         <h1 class="sc-page-title">System</h1>
         <p class="sc-muted mb-0">Cache and rate-limit health. Updates every {{ refreshSeconds }} seconds.</p>
       </div>
-      <a routerLink="/admin/products" class="sc-btn sc-btn-soft"><app-icon name="grid" [size]="18" /> Manage products</a>
+      <div class="d-flex flex-wrap gap-2">
+        <a routerLink="/admin/events" class="sc-btn sc-btn-soft"><app-icon name="activity" [size]="18" /> Events</a>
+        <a routerLink="/admin/products" class="sc-btn sc-btn-soft"><app-icon name="grid" [size]="18" /> Manage products</a>
+      </div>
     </div>
 
     @if (error()) {

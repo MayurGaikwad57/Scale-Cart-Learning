@@ -4,6 +4,8 @@ import { inventoryRouter } from "../modules/inventory/inventory.routes.js";
 import { ordersRouter } from "../modules/orders/orders.routes.js";
 import { productsRouter } from "../modules/products/products.routes.js";
 import { systemRouter } from "../modules/system/system.routes.js";
+import { eventsRouter } from "../modules/events/events.routes.js";
+import { notificationsRouter } from "../modules/notifications/notifications.routes.js";
 import { authRouter } from "../modules/users/users.routes.js";
 
 // Central place where each module's router is mounted under its URL prefix.
@@ -14,3 +16,5 @@ apiRouter.use("/inventory", inventoryRouter);
 apiRouter.use("/cart", cartRouter);
 apiRouter.use("/orders", ordersRouter);
 apiRouter.use("/admin/system", systemRouter);
+apiRouter.use("/admin/events", eventsRouter);
+apiRouter.use("/notifications", notificationsRouter);

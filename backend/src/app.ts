@@ -2,6 +2,7 @@ import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import { env } from "./config/env.js";
+import { broker } from "./config/broker.js";
 import { kv } from "./config/kv.js";
 import { prisma } from "./config/prisma.js";
 import { errorHandler } from "./middleware/errorHandler.js";
@@ -27,7 +28,7 @@ export function createApp() {
   app.get("/health/ready", async (_req, res) => {
     try {
       await prisma.$queryRaw`SELECT 1`;
-      res.json({ status: "ready", kv: kv.status });
+      res.json({ status: "ready", kv: kv.status, log: broker.conn.status });
     } catch {
       res.status(503).json({ status: "db_unavailable" });
     }
