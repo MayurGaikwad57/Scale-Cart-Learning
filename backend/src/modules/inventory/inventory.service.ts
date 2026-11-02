@@ -35,7 +35,7 @@ export const inventoryService = {
       if ((err as { code?: string }).code === "P2003") throw notFound("product_not_found"); // FK violation
       throw err;
     }
-    await invalidateProducts([productId]); // cached product pages show stock
+    await invalidateProducts([productId], { catalog: true }); // product + list pages show stock
     return dto(row);
   },
 };

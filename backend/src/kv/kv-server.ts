@@ -9,6 +9,8 @@
  *   KV_PORT      default 6380 (6379 is real Redis' port; we stay off it to avoid confusion)
  *   KV_HOST      default 127.0.0.1 (no password -> never expose it to the network)
  *   KV_MAX_KEYS  default 10000 (beyond that the least-recently-used keys are evicted)
+ *   KV_PROTECTED_PREFIXES  default "rl:,idem:,product:ver:,products:ver" - evicted last: rate-limit
+ *                counters, idempotency records and cache version counters can't be rebuilt.
  */
 import "dotenv/config";
 import { startKvServer } from "./server.js";
@@ -16,8 +18,12 @@ import { startKvServer } from "./server.js";
 const port = Number(process.env.KV_PORT ?? 6380);
 const host = process.env.KV_HOST ?? "127.0.0.1";
 const maxKeys = Number(process.env.KV_MAX_KEYS ?? 10_000);
+const protectedPrefixes = (process.env.KV_PROTECTED_PREFIXES ?? "rl:,idem:,product:ver:,products:ver")
+  .split(",")
+  .map((p) => p.trim())
+  .filter(Boolean);
 
-const kv = await startKvServer({ port, host, maxKeys }).catch((err: NodeJS.ErrnoException) => {
+const kv = await startKvServer({ port, host, maxKeys, protectedPrefixes }).catch((err: NodeJS.ErrnoException) => {
   console.error(err.code === "EADDRINUSE" ? `[scalekv] port ${port} is already in use` : err);
   process.exit(1);
 });

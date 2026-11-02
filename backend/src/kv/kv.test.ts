@@ -101,6 +101,17 @@ describe("KvStore (the engine)", () => {
     expect(s.stats.evictedKeys).toBe(1);
   });
 
+  it("evicts cache keys before protected keys (rate-limit counters, idempotency records)", () => {
+    const s = new KvStore({ maxKeys: 3, protectedPrefixes: ["rl:", "idem:"] });
+    s.execute(["SET", "rl:ip:1", "5"]); // oldest, but protected
+    s.execute(["SET", "idem:order:k", "running"]);
+    s.execute(["SET", "product:a", "x"]);
+    s.execute(["SET", "product:b", "y"]); // over the limit
+    expect(s.execute(["EXISTS", "rl:ip:1", "idem:order:k"])).toBe(2);
+    expect(s.execute(["GET", "product:a"])).toBeNull(); // the cache entry went instead
+    expect(s.execute(["GET", "product:b"])).toBe("y");
+  });
+
   it("active expiry removes expired keys nobody reads", () => {
     const c = clock();
     const s = new KvStore({ now: c.now });
@@ -146,6 +157,25 @@ describe("ScaleKV server + client over real TCP", () => {
     expect(await c.get("k")).toBe("v");
     await expect(c.command("INCR", "k")).rejects.toBeInstanceOf(KvCommandError);
     expect((await c.info()).keys).toBe("2");
+  });
+
+  it("a FROZEN server (connection open, no replies) is detected after 3 timeouts -> fail fast", async () => {
+    const sockets: net.Socket[] = [];
+    const frozen = net.createServer((s) => void sockets.push(s)); // accepts, never answers
+    await new Promise<void>((r) => frozen.listen(0, "127.0.0.1", r));
+    const c = newClient({ commandTimeoutMs: 30 });
+    c.connect(`kv://127.0.0.1:${(frozen.address() as net.AddressInfo).port}`);
+    await c.waitUntilReady();
+    // Stop accepting NEW connections (the open one stays frozen), so reconnects keep failing.
+    const closed = new Promise((r) => frozen.close(r));
+    for (let i = 0; i < 3; i++) await expect(c.get("k")).rejects.toThrow("timed out");
+    await expect.poll(() => c.status).toBe("down");
+    const started = Date.now();
+    await expect(c.get("k")).rejects.toBeInstanceOf(KvUnavailableError);
+    expect(Date.now() - started).toBeLessThan(20); // no more waiting for timeouts
+    await c.disconnect();
+    sockets.forEach((s) => s.destroy());
+    await closed;
   });
 
   it("two clients share one store - that is the point of a separate process", async () => {

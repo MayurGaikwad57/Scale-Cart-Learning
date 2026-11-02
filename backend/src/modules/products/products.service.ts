@@ -8,6 +8,7 @@ import {
   NOT_FOUND_TTL_MS,
   PRODUCT_TTL_MS,
   productKeys,
+  productVersion,
 } from "./products.cache.js";
 import { productsRepository } from "./products.repository.js";
 import type { CreateProductInput, ListQuery, UpdateProductInput } from "./products.validation.js";
@@ -44,10 +45,18 @@ export const productsService = {
     // The cached value is the product as stored, INCLUDING inactive ones, so one cache entry
     // serves admins and customers; the visibility rule is applied after the cache.
     // A product id that doesn't exist is cached as "null" for 15s (cache penetration guard).
-    const r = await cached(productKeys.detail(id), { ttlMs: PRODUCT_TTL_MS, negativeTtlMs: NOT_FOUND_TTL_MS }, async () => {
+    const load = async () => {
       const row = await productsRepository.findById(id);
       return row ? toProductDto(row) : null;
-    });
+    };
+    const ver = await productVersion(id);
+    let r: Cached<ProductDto | null>;
+    if (ver === null) {
+      countBypass();
+      r = { data: await load(), cache: "BYPASS" };
+    } else {
+      r = await cached(productKeys.detail(id, ver), { ttlMs: PRODUCT_TTL_MS, negativeTtlMs: NOT_FOUND_TTL_MS }, load);
+    }
     // Inactive (deleted) products look like they don't exist to everyone except admins.
     if (!r.data || (!r.data.active && !isAdmin)) throw notFound("product_not_found");
     return { data: r.data, cache: r.cache };
@@ -66,7 +75,7 @@ export const productsService = {
   async create(input: CreateProductInput) {
     try {
       const product = toProductDto(await productsRepository.create(input));
-      await invalidateProducts([product.id]); // new product must appear in lists/categories
+      await invalidateProducts([product.id], { catalog: true }); // must appear in lists/categories
       return product;
     } catch (err) {
       if (isCode(err, "P2002")) throw conflict("sku_taken");
@@ -84,7 +93,7 @@ export const productsService = {
       throw err;
     }
     // Database first, cache second (see products.cache.ts).
-    await invalidateProducts([id]);
+    await invalidateProducts([id], { catalog: true });
     return product;
   },
 

@@ -44,6 +44,13 @@ Key ideas, each one a classic interview topic:
   wrong data. A test simulates exactly this (head-of-line blocking).
 - **Fail fast.** While disconnected, commands are rejected **immediately** rather than queued. A cache must never make
   the app slower than having no cache.
+- **Circuit breaker for a frozen server.** A server that keeps the TCP connection open but never answers is worse than a
+  dead one, because every request waits the full timeout. After **3 timeouts in a row** the client drops the connection
+  itself, so status becomes `down` and later commands fail fast. Reconnect then probes again with backoff.
+- **Protected keys.** Eviction skips keys starting with `rl:`, `idem:`, `product:ver:`, `products:ver`
+  (`KV_PROTECTED_PREFIXES`) as long as there is a plain cache entry to evict instead. A cached page can be rebuilt from
+  PostgreSQL. A rate-limit counter or an idempotency record cannot, and evicting them would reset an attacker's login limit.
+  With real Redis you would usually run a separate instance for such state.
 - **Reconnect with exponential backoff:** 100 ms → 200 → 400 … max 5 s.
 - **Security.** It binds to `127.0.0.1` and has no password. Never expose it (real Redis: `requirepass`/ACLs, TLS, private network).
 - **Not implemented, on purpose:** persistence (RDB snapshots / AOF log), replication, other data types (lists, hashes,
@@ -61,10 +68,10 @@ write: UPDATE PostgreSQL (commit) ──► then invalidate the cache keys
 
 | Key | TTL | Invalidated by |
 |---|---|---|
-| `product:<id>` | 60 s | product edit/delete, admin stock change, **every checkout** (stock changed) |
-| `products:list:v<ver>:<hash of query>` | 30 s | `INCR products:ver` |
+| `product:<id>:v<pver>` | 60 s | `INCR product:ver:<id>`: product edit/delete, admin stock change, a **successful** checkout of that product |
+| `products:list:v<ver>:<hash of query>` | 30 s | `INCR products:ver`: admin product/stock changes only |
 | `products:categories:v<ver>` | 5 min | `INCR products:ver` |
-| `product:<id>` = `__null__` (not found) | 15 s | (expires) |
+| `product:<id>:v<pver>` = `__null__` (not found) | 15 s | (expires) |
 
 - **Versioned keys.** We can't know which of the many cached list pages (search × category × price × sort × page) contain
   a changed product. `KEYS products:list:*` would be O(N) and blocks the single thread. Instead, one `INCR products:ver`
@@ -72,9 +79,15 @@ write: UPDATE PostgreSQL (commit) ──► then invalidate the cache keys
   data during the write stores it under the *old* version, where nobody looks. That race is gone.
 - **Invalidate after commit, never inside the transaction.** Otherwise a reader could re-cache the old row between our
   delete and our commit.
-- **Remaining race (`product:<id>`):** reader misses → reads old row → writer commits + deletes → reader stores old row.
-  The stale value lives at most 60 s. Mitigations: short TTL (ours), versioned keys, "delayed double delete", or CDC-driven
-  invalidation (M8).
+- **Why product keys are versioned too (found in code review).** With a plain `DEL` there is a race: a reader misses, reads
+  the OLD row, then the writer commits and deletes, and only then does the reader store the old row. That stale copy is served
+  for a full TTL. With versions, the late write lands in `product:<id>:v4` while everyone already reads `…:v5`, so nobody
+  ever sees it. A test reproduces exactly this. (Other mitigations you may hear about: "delayed double delete", CDC-driven
+  invalidation in M8.)
+- **Checkout does NOT retire the list cache (found in code review).** Bumping `products:ver` on every order would, at one
+  order per second, wipe every cached list page every second (hit rate ≈ 0). A sale refreshes only the sold product's own page,
+  and a declined payment refreshes nothing because net stock is unchanged. **Trade-off:** the stock figure on a catalog *list*
+  page may lag by up to 30 s. That is acceptable because the product page is exact and checkout re-checks real stock under row locks.
 - **Admins bypass the cache.** They edit products and must see the change immediately.
 - `X-Cache: HIT | MISS | BYPASS` response header makes it visible in DevTools. The **API counts its own hit rate** (Admin →
   System status), because ScaleKV's `keyspace_hits/misses` count *every* GET, including the rate limiter reading an empty
@@ -107,12 +120,15 @@ Algorithms compared:
 | Token bucket | refill `r` tokens/s up to capacity `b`; a request takes a token | allows controlled bursts; needs atomic read-modify-write of 2 fields (Lua in Redis) |
 | **Sliding window counter** (ours) | `estimate = previous × (1 − elapsed%) + current` | 2 counters per client, no boundary burst, needs only `INCR`/`GET`; an approximation (assumes the previous window was evenly spread) |
 
+The rules live in one object (`rules` in `rateLimit.ts`). The admin System page reads the same object, so it can never show stale numbers.
+
 Per request: `SET cur 0 PX 2w NX` · `INCR cur` · `GET prev`, pipelined in one round trip. Setting the TTL *before*
 the INCR means no counter can ever exist without an expiry. The response includes `RateLimit-Limit/Remaining/Reset`, and on 429 also `Retry-After`.
 
 **Fail open.** If ScaleKV is down, requests are allowed. Fail closed would turn a cache outage into a full outage. A
 bank's login limiter might choose differently; that is a trade-off, not a rule. Behind a proxy or load balancer,
-`req.ip` needs `app.set("trust proxy", …)`, otherwise every client looks like the proxy.
+`req.ip` is the *proxy's* address, so every user would share one bucket. Set `TRUST_PROXY` (number of hops, e.g. `1`) and
+Express takes the client IP from `X-Forwarded-For`. Only do that behind a proxy you control, because the header is easy to fake.
 
 ---
 
@@ -130,7 +146,8 @@ Two layers:
    - same key with a **different body** (fingerprint = SHA-256 of the body) → **422 `idempotency_key_reused`**
    - handler threw (e.g. cart empty) → delete the record so the same key may be retried after fixing it
    - success → store `{done, status, body}` for 24 h
-2. **PostgreSQL (the guarantee):** `orders.idempotency_key` with `UNIQUE (user_id, idempotency_key)`.
+2. **PostgreSQL (the guarantee):** `orders.idempotency_key` with `UNIQUE (user_id, idempotency_key)`, plus
+   `orders.idempotency_fingerprint`, so a different body is still a 422 after the ScaleKV record is gone (found in code review).
    Inside the checkout transaction, **after** locking the user's cart row (`SELECT … FOR UPDATE`), we look for an order
    with that key. This is *lock, then check*: no other checkout of this user can run between the check and the insert. If
    anything still slips through, the unique constraint raises `P2002`, and we return the existing order.
@@ -139,9 +156,10 @@ Why both? ScaleKV can lose the record (restart, eviction, outage). The database 
 "in progress". Tests cover: same key twice, different body, two simultaneous requests, the ScaleKV record wiped, and ScaleKV down.
 
 Frontend (`checkout.page.ts`, `orders.service.ts`): the key is created on the first click. It is **kept** when the outcome
-is unknown (status 0 / 5xx), so pressing again is the same attempt. It is **dropped** after a clear answer or when the payment
-method changes. The HTTP call retries itself up to 2× (0.5 s, 1 s) for 0 / 5xx / `request_in_progress`. That is safe *only because*
-of the key.
+is unknown: status 0 / 5xx, **and 409 `request_in_progress`** (the order may still succeed; found in code review). Pressing
+again is then the same attempt. It is **dropped** after a clear answer or when the payment method changes. Automatic
+retries: a lost answer twice (0.5 s, 1 s); "in progress" every 2 s for up to 20 s, which is longer than the server can take
+(5 s waiting for a DB connection + 10 s transaction). That is safe *only because* of the key.
 
 Honest note: our cart lock already stopped double *charges* in M2 (the second request found an empty cart). What
 idempotency adds is the **right answer**: the retry gets *"here is your order"* instead of a confusing *"cart is empty"*.
@@ -156,14 +174,18 @@ And it is essential for APIs without a cart, such as payments.
 | ScaleKV not configured (`KV_URL` empty) | Everything works from PostgreSQL; no rate limits; idempotency via the DB only |
 | ScaleKV crashes while running | Commands fail fast; reads `BYPASS`; limits fail open; client reconnects automatically (verified live) |
 | ScaleKV slow | 250 ms command timeout → treated as unavailable for that request |
+| ScaleKV frozen (connection open, no replies) | 3 timeouts in a row → connection dropped → fail fast, reconnect probes |
+| ScaleKV full | LRU evicts cache entries first; rate-limit counters, idempotency records and version counters are kept |
 | ScaleKV restarted (data lost) | Cold cache (misses until warm); counters reset; DB layer still dedupes orders |
 | Stale cache after a missed invalidation | Bounded by TTL (≤ 60 s); checkout always re-checks real stock under row locks, so you can never oversell |
 
 ## 6. Verification
-- Backend: **65 tests** (32 from M1–M3 + 33 new: protocol, store, TCP client/server, cache, rate limits, idempotency,
-  ScaleKV-down). New tests were **mutation-checked**: removing invalidation, the rate-limit check, both DB idempotency
-  layers, the queue-slot handling or LRU refresh makes them fail.
-- Frontend: 17 unit tests. A browser run in Edge: cache MISS→HIT, checkout with the first request **dropped** → automatic
+- Backend: **70 tests** (32 from M1–M3 + 38 new: protocol, store, TCP client/server, cache, rate limits, idempotency,
+  ScaleKV-down, plus one per code-review fix). New tests were **mutation-checked**: removing invalidation, the rate-limit
+  check, both DB idempotency layers, the queue-slot handling, LRU refresh, per-product versions, scoped checkout
+  invalidation, the DB fingerprint check, the circuit breaker or protected eviction makes them fail.
+- Frontend: 20 unit tests (including the checkout retry policy).
+- Code review of the PR found 10 issues; all were confirmed and fixed (sections 1–4 mark them "found in code review"). A browser run in Edge: cache MISS→HIT, checkout with the first request **dropped** → automatic
   retry with the same key → exactly one order; System page on desktop and mobile; login 429 message. Live kill/restart of
   ScaleKV: the shop kept serving (`BYPASS`) and the API reconnected on its own.
 

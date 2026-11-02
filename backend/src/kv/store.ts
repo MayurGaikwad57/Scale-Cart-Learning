@@ -20,6 +20,12 @@ interface Entry {
 export interface StoreOptions {
   /** Max number of keys. Above it, the least-recently-used key is evicted (like maxmemory + allkeys-lru). */
   maxKeys?: number;
+  /**
+   * Keys starting with these prefixes are evicted only if nothing else can be. A cache entry can
+   * always be rebuilt from the database; a rate-limit counter or an idempotency record cannot.
+   * (With real Redis you'd typically run a separate instance for such state, or use volatile-lru.)
+   */
+  protectedPrefixes?: string[];
   /** Injectable clock so tests can "travel in time". */
   now?: () => number;
 }
@@ -50,6 +56,7 @@ export class KvStore {
   private volatileCursor: Iterator<string> | null = null;
 
   private readonly maxKeys: number;
+  private readonly protectedPrefixes: string[];
   private readonly now: () => number;
   private readonly startedAt: number;
 
@@ -57,6 +64,7 @@ export class KvStore {
 
   constructor(opts: StoreOptions = {}) {
     this.maxKeys = opts.maxKeys ?? 10_000;
+    this.protectedPrefixes = opts.protectedPrefixes ?? [];
     this.now = opts.now ?? Date.now;
     this.startedAt = this.now();
   }
@@ -96,10 +104,22 @@ export class KvStore {
     else this.volatile.add(key);
     // EVICTION: over the limit -> drop the least recently used key(s).
     while (this.data.size > this.maxKeys) {
-      const oldest = this.data.keys().next().value as string;
-      this.remove(oldest);
+      this.remove(this.evictionCandidate(key));
       this.stats.evictedKeys++;
     }
+  }
+
+  /** Least recently used key that isn't protected (looks at the 64 oldest), else the oldest one. */
+  private evictionCandidate(justWritten: string): string {
+    let checked = 0;
+    let fallback: string | undefined;
+    for (const k of this.data.keys()) {
+      if (k === justWritten) continue; // never evict the key we are writing right now
+      fallback ??= k;
+      if (!this.protectedPrefixes.some((p) => k.startsWith(p))) return k;
+      if (++checked >= 64) break;
+    }
+    return fallback ?? justWritten;
   }
 
   /**

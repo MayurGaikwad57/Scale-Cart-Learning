@@ -14,12 +14,13 @@ ordersRouter.use(authenticate);
 ordersRouter.post("/", limits.orders, validateBody(createOrderSchema), async (req, res) => {
   const userId = req.user!.id;
   const key = idempotencyKeySchema.parse(req.header("Idempotency-Key"));
+  const fp = fingerprint(req.body);
   const result = await withIdempotency({
     scope: `order:${userId}`,
     key,
-    fingerprint: fingerprint(req.body),
+    fingerprint: fp,
     run: async () => {
-      const { order, replayed } = await ordersService.create(userId, req.body.paymentMethod, key);
+      const { order, replayed } = await ordersService.create(userId, req.body.paymentMethod, key ? { key, fingerprint: fp } : undefined);
       return { status: 201, body: order, replayed };
     },
   });

@@ -23,6 +23,7 @@ interface Pending {
 
 export interface KvClientOptions {
   commandTimeoutMs?: number;
+  maxConsecutiveTimeouts?: number;
   connectTimeoutMs?: number;
   log?: boolean;
 }
@@ -40,6 +41,10 @@ export interface KvClientOptions {
  *    NEXT command - that misalignment would be a nasty bug.
  *  - RECONNECT with exponential backoff (100ms, 200ms, 400ms ... max 5s) so a restarted
  *    ScaleKV is picked up automatically without hammering it while it's down.
+ *  - CIRCUIT BREAKER: a server that is "up but frozen" (TCP open, no replies) is worse than a
+ *    dead one: every request would wait the full timeout. After `maxConsecutiveTimeouts`
+ *    timeouts in a row we drop the connection ourselves -> status "down" -> fail fast, and the
+ *    normal reconnect logic probes it again. Any reply resets the count.
  */
 export class KvClient {
   status: KvStatus = "disabled";
@@ -53,10 +58,11 @@ export class KvClient {
   private retryMs = 100;
   private reconnectTimer: NodeJS.Timeout | undefined;
   private closing = false;
+  private consecutiveTimeouts = 0;
   private readonly opts: Required<KvClientOptions>;
 
   constructor(opts: KvClientOptions = {}) {
-    this.opts = { commandTimeoutMs: 250, connectTimeoutMs: 1000, log: true, ...opts };
+    this.opts = { commandTimeoutMs: 250, connectTimeoutMs: 1000, maxConsecutiveTimeouts: 3, log: true, ...opts };
   }
 
   get isReady() {
@@ -122,6 +128,7 @@ export class KvClient {
     socket.setTimeout(this.opts.connectTimeoutMs);
     socket.once("connect", () => {
       socket.setTimeout(0);
+      this.consecutiveTimeouts = 0;
       this.retryMs = 100;
       this.setStatus("ready");
     });
@@ -150,12 +157,22 @@ export class KvClient {
     this.parser.push(chunk);
     try {
       for (let r = this.parser.next(); r !== undefined; r = this.parser.next()) {
+        this.consecutiveTimeouts = 0; // the server is answering
         const p = this.pending.shift();
         if (!p || p.settled) continue; // late reply of a timed-out command: drop it
         this.settle(p, r instanceof RespError ? new KvCommandError(r.message) : undefined, r);
       }
     } catch {
       this.socket?.destroy(); // unparseable stream -> reconnect for a clean state
+    }
+  }
+
+  private onTimeout(p: Pending, socket: net.Socket) {
+    this.settle(p, new KvUnavailableError("kv command timed out"));
+    if (++this.consecutiveTimeouts >= this.opts.maxConsecutiveTimeouts && socket === this.socket) {
+      if (this.opts.log) console.warn(`[kv] ${this.consecutiveTimeouts} timeouts in a row - treating ScaleKV as down`);
+      this.consecutiveTimeouts = 0;
+      socket.destroy(); // -> onClose: fails everything pending, status "down", reconnect with backoff
     }
   }
 
@@ -178,7 +195,7 @@ export class KvClient {
         resolve,
         reject,
         settled: false,
-        timer: setTimeout(() => this.settle(p, new KvUnavailableError("kv command timed out")), this.opts.commandTimeoutMs),
+        timer: setTimeout(() => this.onTimeout(p, socket), this.opts.commandTimeoutMs),
       };
       this.pending.push(p);
       socket.write(encodeCommand(args));

@@ -85,12 +85,20 @@ export function rateLimit(rule: RateLimitRule): RequestHandler {
   };
 }
 
-// The rules ScaleCart uses. Kept together so they're easy to find and tune.
-export const limits = {
+const byIp = (req: Request) => `ip:${req.ip}`;
+
+// The rules ScaleCart uses - the ONE place to tune them (the admin System page reads these too).
+export const rules = {
   // Every API call, per IP: stops one client from flooding the whole API.
-  global: rateLimit({ name: "global", limit: 300, windowMs: 60_000, keyBy: (req) => `ip:${req.ip}` }),
+  global: { name: "global", limit: 300, windowMs: 60_000, keyBy: byIp, per: "IP address", appliesTo: "every API request" },
   // Login/register, per IP: makes password guessing slow. (Try 11 wrong logins in the UI.)
-  auth: rateLimit({ name: "auth", limit: 10, windowMs: 60_000, keyBy: (req) => `ip:${req.ip}` }),
+  auth: { name: "auth", limit: 10, windowMs: 60_000, keyBy: byIp, per: "IP address", appliesTo: "login & register" },
   // Checkout, per user: placing orders is expensive (DB locks, payment calls).
-  orders: rateLimit({ name: "orders", limit: 10, windowMs: 60_000 }),
+  orders: { name: "orders", limit: 10, windowMs: 60_000, per: "user", appliesTo: "placing orders" },
+} satisfies Record<string, RateLimitRule & { per: string; appliesTo: string }>;
+
+export const limits = {
+  global: rateLimit(rules.global),
+  auth: rateLimit(rules.auth),
+  orders: rateLimit(rules.orders),
 };

@@ -66,6 +66,18 @@ describe("cache-aside: product detail", () => {
     expect(after.body.stock).toBe(3);
   });
 
+  it("a slow reader's late write of OLD data after an invalidation is never served (versioned keys)", async () => {
+    const p = await makeProduct(5, { priceCents: 1000 });
+    const before = await getProduct(p.id); // cached under product:<id>:v0
+    await request(app).put(`/products/${p.id}`).set(admin.auth).send({ priceCents: 2500 }).expect(200);
+    // Simulate the race: a reader that loaded the OLD row before the commit stores it AFTER the
+    // invalidation - with plain DEL this stale copy would now be served for 60s.
+    server.store.execute(["SET", `product:${p.id}:v0`, JSON.stringify(before.body), "PX", "60000"]);
+    const after = await getProduct(p.id);
+    expect(after.body.priceCents).toBe(2500);
+    expect((await getProduct(p.id)).headers["x-cache"]).toBe("HIT");
+  });
+
   it("an admin stock update invalidates it too", async () => {
     const p = await makeProduct(5);
     await getProduct(p.id);
@@ -84,8 +96,8 @@ describe("cache-aside: product detail", () => {
   it("caches 'not found' briefly (cache penetration guard)", async () => {
     const ghost = randomUUID();
     await getProduct(ghost).expect(404);
-    expect(server.store.execute(["GET", `product:${ghost}`])).toBe("__null__");
-    const ttl = server.store.execute(["PTTL", `product:${ghost}`]) as number;
+    expect(server.store.execute(["GET", `product:${ghost}:v0`])).toBe("__null__");
+    const ttl = server.store.execute(["PTTL", `product:${ghost}:v0`]) as number;
     expect(ttl).toBeGreaterThan(0);
     expect(ttl).toBeLessThanOrEqual(15_000 * 1.1);
     await getProduct(ghost).expect(404); // answered from the cache, no DB query
@@ -94,8 +106,28 @@ describe("cache-aside: product detail", () => {
   it("spreads TTLs randomly (avalanche guard)", async () => {
     const ps = await Promise.all([1, 2, 3, 4, 5, 6].map(() => makeProduct(1)));
     await Promise.all(ps.map((p) => getProduct(p.id)));
-    const ttls = new Set(ps.map((p) => server.store.execute(["PTTL", `product:${p.id}`])));
+    const ttls = new Set(ps.map((p) => server.store.execute(["PTTL", `product:${p.id}:v0`])));
     expect(ttls.size).toBeGreaterThan(1);
+  });
+});
+
+describe("checkout invalidates only what it must", () => {
+  it("a sale refreshes that product's page but keeps the list cache; a declined payment invalidates nothing", async () => {
+    const p = await makeProduct(10);
+    const catalogVer = () => server.store.execute(["GET", "products:ver"]);
+    const productVer = () => server.store.execute(["GET", `product:ver:${p.id}`]);
+    const verBefore = catalogVer();
+
+    const declined = await makeUser();
+    await addToCart(declined, p.id);
+    expect((await placeOrder(declined, undefined, "TEST_CARD_DECLINE")).body.status).toBe("CANCELLED");
+    expect(productVer()).toBeNull(); // net stock unchanged -> nothing to invalidate
+
+    const buyer = await makeUser();
+    await addToCart(buyer, p.id);
+    expect((await placeOrder(buyer)).status).toBe(201);
+    expect(productVer()).toBe("1"); // product page refreshed
+    expect(catalogVer()).toBe(verBefore); // list pages + categories untouched (hit rate survives)
   });
 });
 
@@ -217,6 +249,18 @@ describe("idempotent order creation", () => {
     expect(retry.status).toBe(201);
     expect(retry.headers["idempotent-replayed"]).toBe("true");
     expect(retry.body.id).toBe(first.body.id);
+    expect(await ordersWithKey(u, key)).toBe(1);
+  });
+
+  it("the database layer also rejects the same key with a different body (422)", async () => {
+    const u = await makeUser();
+    await addToCart(u, (await makeProduct(5)).id);
+    const key = randomUUID();
+    expect((await placeOrder(u, key, "TEST_CARD_DECLINE")).body.status).toBe("CANCELLED");
+    flush(); // the fast ScaleKV record is gone - only the order row remembers the key
+    const misuse = await placeOrder(u, key, "TEST_CARD_SUCCESS");
+    expect(misuse.status).toBe(422);
+    expect(misuse.body.error).toBe("idempotency_key_reused");
     expect(await ordersWithKey(u, key)).toBe(1);
   });
 

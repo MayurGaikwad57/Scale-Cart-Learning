@@ -1,4 +1,3 @@
-import { HttpErrorResponse } from '@angular/common/http';
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -6,7 +5,7 @@ import { Router, RouterLink } from '@angular/router';
 import { errorMessage } from '../../core/http-error';
 import { PaymentMethod } from '../../core/models';
 import { CartService } from '../../core/services/cart.service';
-import { OrdersService } from '../../core/services/orders.service';
+import { isUnknownOutcome, OrdersService } from '../../core/services/orders.service';
 import { Icon } from '../../shared/components/icon';
 import { ProductArt } from '../../shared/components/product-art';
 import { MoneyPipe } from '../../shared/pipes/money.pipe';
@@ -122,8 +121,8 @@ export class CheckoutPage {
     this.orders.place(this.form.controls.paymentMethod.value, this.attemptKey).subscribe({
       next: (order) => void this.router.navigate(['/orders', order.id], { queryParams: { placed: 1 } }),
       error: (e) => {
-        const unknownOutcome = e instanceof HttpErrorResponse && (e.status === 0 || e.status >= 500);
-        if (unknownOutcome) {
+        // Includes "still processing" (409): the order may well succeed - keep the same key.
+        if (isUnknownOutcome(e)) {
           this.error.set('We could not confirm your order (connection problem). Pressing "Place order" again is safe: you will never be charged twice.');
         } else {
           this.attemptKey = null;
