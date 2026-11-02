@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { Prisma } from "../../../generated/prisma/client.js";
 import { prisma } from "../../config/prisma.js";
-import { badRequest, conflict, notFound } from "../../utils/errors.js";
+import { badRequest, conflict, HttpError, notFound } from "../../utils/errors.js";
+import { invalidateProducts } from "../products/products.cache.js";
 import { pageParams } from "../../utils/validation.js";
 import { PAYMENT_METHODS, paymentsService } from "../payments/payments.service.js";
 
@@ -34,6 +35,13 @@ const toDto = (o: OrderRow) => ({
     : null,
 });
 
+// Same Idempotency-Key, different body -> the client is confused; refuse rather than guess.
+function assertSameRequest(stored: string | null, incoming: string) {
+  if (stored !== null && stored !== incoming) {
+    throw new HttpError(422, "idempotency_key_reused", "This Idempotency-Key was already used for a different request.");
+  }
+}
+
 export const ordersService = {
   /**
    * Checkout. ONE database transaction:
@@ -41,13 +49,61 @@ export const ordersService = {
    *   -> charge payment -> confirm (stock sold) OR cancel (stock released)
    * Any thrown error rolls the whole thing back, so we can never end up with an order
    * but no stock change, or the reverse.
+   *
+   * idem (optional): if an order with this key already exists for this user, that order is
+   * returned (replayed: true) instead of creating a second one - provided the request body is
+   * the same (fingerprint), otherwise 422.
    */
-  async create(userId: string, paymentMethod: (typeof PAYMENT_METHODS)[number]) {
-    const orderId = await prisma.$transaction(
+  async create(
+    userId: string,
+    paymentMethod: (typeof PAYMENT_METHODS)[number],
+    idem?: { key: string; fingerprint: string },
+  ) {
+    let result: { orderId: string; productIds: string[]; replayed: boolean; sold: boolean };
+    try {
+      result = await ordersService.checkout(userId, paymentMethod, idem);
+    } catch (err) {
+      // Last line of defence: the UNIQUE (user_id, idempotency_key) constraint. Only reachable if
+      // two requests somehow got past the checks below at the same time.
+      if (idem && (err as { code?: string }).code === "P2002") {
+        const existing = await prisma.order.findFirst({
+          where: { userId, idempotencyKey: idem.key },
+          select: { id: true, idempotencyFingerprint: true },
+        });
+        if (existing) {
+          assertSameRequest(existing.idempotencyFingerprint, idem.fingerprint);
+          return { order: await ordersService.getForUser(userId, existing.id), replayed: true };
+        }
+      }
+      throw err;
+    }
+    // Stock was sold -> that product's cached page is stale. After commit, never inside the
+    // transaction. A declined payment changed nothing in the end, so nothing to invalidate.
+    if (result.sold) await invalidateProducts(result.productIds, { catalog: false });
+    return { order: await ordersService.getForUser(userId, result.orderId), replayed: result.replayed };
+  },
+
+  /** The transaction itself (see create). */
+  async checkout(userId: string, paymentMethod: (typeof PAYMENT_METHODS)[number], idem?: { key: string; fingerprint: string }) {
+    return prisma.$transaction(
       async (tx) => {
         // 1. Serialise checkouts of the same cart. A double-click's second request waits here, then
-        //    sees an already-emptied cart. (Retries across network failures need Phase 2 idempotency keys.)
+        //    sees an already-emptied cart.
         await tx.$queryRaw`SELECT id FROM cart WHERE user_id = ${userId}::uuid FOR UPDATE`;
+
+        // 1b. Idempotency, database layer: "LOCK, THEN CHECK". Because we hold this user's cart
+        //     lock, no other checkout of this user can be between this check and our insert, so
+        //     the check cannot race. (Users without a cart row yet have nothing to order anyway.)
+        if (idem) {
+          const existing = await tx.order.findFirst({
+            where: { userId, idempotencyKey: idem.key },
+            select: { id: true, idempotencyFingerprint: true },
+          });
+          if (existing) {
+            assertSameRequest(existing.idempotencyFingerprint, idem.fingerprint);
+            return { orderId: existing.id, productIds: [], replayed: true, sold: false };
+          }
+        }
 
         const cart = await tx.cart.findUnique({
           where: { userId },
@@ -99,6 +155,8 @@ export const ordersService = {
           data: {
             userId,
             totalCents,
+            idempotencyKey: idem?.key,
+            idempotencyFingerprint: idem?.fingerprint,
             items: {
               create: cart.items.map((i) => ({
                 productId: i.productId,
@@ -137,12 +195,10 @@ export const ordersService = {
           }
           await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLED" } });
         }
-        return order.id;
+        return { orderId: order.id, productIds: ids, replayed: false, sold: payment.status === "SUCCEEDED" };
       },
       { maxWait: 5_000, timeout: 10_000 },
     );
-
-    return ordersService.getForUser(userId, orderId);
   },
 
   async getForUser(userId: string, orderId: string) {

@@ -87,3 +87,28 @@ export interface AuthResponse {
   user: User;
   token: string;
 }
+
+/** GET /admin/system - a look at ScaleKV (our own Redis-like store) and the M4 settings. */
+export type KvStatus = 'disabled' | 'connecting' | 'ready' | 'down';
+export interface SystemStatus {
+  kv: {
+    status: KvStatus;
+    url: string | null;
+    stats: {
+      uptimeSeconds: number;
+      connectedClients: number;
+      keys: number;
+      keysWithTtl: number;
+      maxKeys: number;
+      commandsProcessed: number;
+      hits: number;
+      misses: number;
+      hitRatePercent: number;
+      expiredKeys: number;
+      evictedKeys: number;
+      memoryBytes: number;
+    } | null;
+  };
+  cache: { hits: number; misses: number; bypass: number; hitRatePercent: number; productTtlSeconds: number; listTtlSeconds: number; categoriesTtlSeconds: number; notFoundTtlSeconds: number };
+  rateLimits: { name: string; limit: number; window: string; per: string; appliesTo: string }[];
+}

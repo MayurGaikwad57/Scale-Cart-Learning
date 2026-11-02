@@ -101,6 +101,9 @@ model Order {
   totalCents     Int         @map("total_cents")
   // Used from Phase 2 (idempotent order creation). Unique per user so keys can't collide across users.
   idempotencyKey String?     @map("idempotency_key")
+  // SHA-256 of the request body that used the key: the same key with a DIFFERENT body is a client
+  // bug (422), even after the fast ScaleKV record is gone.
+  idempotencyFingerprint String? @map("idempotency_fingerprint")
   createdAt      DateTime    @default(now()) @map("created_at")
 
   user     User        @relation(fields: [userId], references: [id])

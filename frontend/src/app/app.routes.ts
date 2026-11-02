@@ -24,6 +24,7 @@ export const routes: Routes = [
       { path: '', pathMatch: 'full', redirectTo: 'products' },
       { path: 'products', title: 'Manage products · ScaleCart', loadComponent: () => import('./features/admin/admin-products.page').then((m) => m.AdminProductsPage) },
       { path: 'products/new', title: 'New product · ScaleCart', loadComponent: () => import('./features/admin/product-form.page').then((m) => m.ProductFormPage) },
+      { path: 'system', title: 'System · ScaleCart', loadComponent: () => import('./features/admin/admin-system.page').then((m) => m.AdminSystemPage) },
       { path: 'products/:id/edit', title: 'Edit product · ScaleCart', loadComponent: () => import('./features/admin/product-form.page').then((m) => m.ProductFormPage) },
     ],
   },

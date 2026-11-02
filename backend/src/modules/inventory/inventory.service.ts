@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "../../config/prisma.js";
 import { notFound } from "../../utils/errors.js";
+import { invalidateProducts } from "../products/products.cache.js";
 import { uuid } from "../../utils/validation.js";
 
 export const setStockSchema = z.object({
@@ -23,16 +24,18 @@ export const inventoryService = {
 
   // Admin sets the absolute sellable quantity. "reserved" is owned by the order flow, not touched here.
   async setStock(productId: string, available: number) {
+    let row;
     try {
-      const row = await prisma.inventory.upsert({
+      row = await prisma.inventory.upsert({
         where: { productId },
         create: { productId, available },
         update: { available, version: { increment: 1 } },
       });
-      return dto(row);
     } catch (err) {
       if ((err as { code?: string }).code === "P2003") throw notFound("product_not_found"); // FK violation
       throw err;
     }
+    await invalidateProducts([productId], { catalog: true }); // product + list pages show stock
+    return dto(row);
   },
 };

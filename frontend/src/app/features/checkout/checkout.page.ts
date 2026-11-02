@@ -1,10 +1,11 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { errorMessage } from '../../core/http-error';
 import { PaymentMethod } from '../../core/models';
 import { CartService } from '../../core/services/cart.service';
-import { OrdersService } from '../../core/services/orders.service';
+import { isUnknownOutcome, OrdersService } from '../../core/services/orders.service';
 import { Icon } from '../../shared/components/icon';
 import { ProductArt } from '../../shared/components/product-art';
 import { MoneyPipe } from '../../shared/pipes/money.pipe';
@@ -98,14 +99,35 @@ export class CheckoutPage {
   protected readonly placing = signal(false);
   protected readonly error = signal<string | null>(null);
 
+  /**
+   * IDEMPOTENCY KEY = the identity of ONE purchase attempt.
+   *  - created on the first "Place order" click,
+   *  - KEPT when the outcome is unknown (network error / server error), so clicking again is the
+   *    SAME attempt: the server returns the order it may already have created - never a second one,
+   *  - DROPPED when the server gave a clear answer (e.g. out of stock) or the user changes the
+   *    payment method: the next click is a genuinely new attempt.
+   */
+  private attemptKey: string | null = null;
+
+  constructor() {
+    this.form.controls.paymentMethod.valueChanges.pipe(takeUntilDestroyed()).subscribe(() => (this.attemptKey = null));
+  }
+
   protected place(): void {
     if (this.placing()) return; // the button is disabled too; this also blocks a keyboard double-submit
     this.placing.set(true);
     this.error.set(null);
-    this.orders.place(this.form.controls.paymentMethod.value).subscribe({
+    this.attemptKey ??= crypto.randomUUID();
+    this.orders.place(this.form.controls.paymentMethod.value, this.attemptKey).subscribe({
       next: (order) => void this.router.navigate(['/orders', order.id], { queryParams: { placed: 1 } }),
       error: (e) => {
-        this.error.set(errorMessage(e));
+        // Includes "still processing" (409): the order may well succeed - keep the same key.
+        if (isUnknownOutcome(e)) {
+          this.error.set('We could not confirm your order (connection problem). Pressing "Place order" again is safe: you will never be charged twice.');
+        } else {
+          this.attemptKey = null;
+          this.error.set(errorMessage(e));
+        }
         this.placing.set(false);
         this.cart.refresh().subscribe({ error: () => undefined }); // stock may have changed
       },

@@ -24,7 +24,10 @@ const PAGE_SIZE = 20;
         <h1 class="sc-page-title">Manage products</h1>
         <p class="sc-muted mb-0">Create products, change prices, set stock and show or hide items in the shop.</p>
       </div>
-      <a routerLink="/admin/products/new" class="sc-btn sc-btn-primary"><app-icon name="plus" [size]="18" /> New product</a>
+      <div class="d-flex flex-wrap gap-2">
+        <a routerLink="/admin/system" class="sc-btn sc-btn-soft"><app-icon name="zap" [size]="18" /> System status</a>
+        <a routerLink="/admin/products/new" class="sc-btn sc-btn-primary"><app-icon name="plus" [size]="18" /> New product</a>
+      </div>
     </div>
 
     @if (error()) {

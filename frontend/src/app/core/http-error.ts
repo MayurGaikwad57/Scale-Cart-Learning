@@ -14,9 +14,12 @@ export function errorMessage(err: unknown): string {
     email_taken: 'An account with this email already exists.',
     sku_taken: 'A product with this SKU already exists.',
     cart_empty: 'Your cart is empty.',
-    too_many_requests: 'Too many requests. Please wait a moment.',
+    idempotency_key_reused: 'This checkout attempt was already used with different details. Please try again.',
+    request_in_progress: 'Your order is still being processed. Please wait a moment.',
   };
   if (body?.error && friendly[body.error]) return friendly[body.error];
+  // 429: the server message says how long to wait ("... try again in 42 seconds").
+  if (err.status === 429) return body?.message ?? 'Too many requests. Please wait a moment and try again.';
   // insufficient_stock / product_unavailable etc. carry a readable message from the server.
   if (body?.message && body.message !== body.error) return body.message;
   return body?.error?.replaceAll('_', ' ') ?? `Request failed (${err.status}).`;
