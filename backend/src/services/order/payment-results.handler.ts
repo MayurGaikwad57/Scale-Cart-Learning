@@ -23,7 +23,9 @@ export async function paymentResultHandler(e: PaymentEvent) {
   if (e.type === "PaymentSucceeded") {
     await ordersService.confirm(orderId);
   } else {
-    await ordersService.cancel(orderId, "payment_declined", "FAILED");
+    // Keep the real cause: a declined card is the customer's to fix, anything else is not.
+    const reason = e.data.reason === undefined || e.data.reason === "card_declined" ? "payment_declined" : "payment_failed";
+    await ordersService.cancel(orderId, reason, "FAILED");
   }
 
   // Publish the order's CURRENT fate - also when another delivery already changed it.

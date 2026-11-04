@@ -59,7 +59,10 @@ export const orderEvents = {
     makeEvent<OrderCancelled>("OrderCancelled", 1, { orderId: o.id, userId, totalCents: o.totalCents, reason: o.statusReason ?? "cancelled", items: lines(o) }),
 };
 
-export type ReserveOutcome = "reserved" | "insufficient_stock" | "released" | "unknown" | "unreachable";
+export type ReserveOutcome = "reserved" | "insufficient_stock" | "released" | "rejected" | "unknown" | "unreachable";
+
+/** Same limit as the inventory service's reserveSchema: checked here so the customer gets a clear 400. */
+export const MAX_ORDER_LINES = 100;
 
 /** Synchronous call to the Inventory Service. Returns what we KNOW about the outcome. */
 export async function reserveStock(orderId: string, items: { productId: string; quantity: number }[]) {
@@ -76,6 +79,12 @@ export async function reserveStock(orderId: string, items: { productId: string; 
       return { outcome: "insufficient_stock" as const, productId: res.body.productId!, available: res.body.available ?? 0 };
     }
     if (res.status === 409 && res.body.error === "reservation_released") return { outcome: "released" as const };
+    // Any other 4xx: the inventory service ANSWERED and refused (bad request, wrong service token).
+    // That is a definite "nothing was reserved", not an unknown outcome (found in code review).
+    if (res.status >= 400 && res.status < 500) {
+      console.error(`[order] inventory refused the reservation: ${res.status}`, res.body);
+      return { outcome: "rejected" as const };
+    }
     console.error(`[order] unexpected inventory answer ${res.status}`, res.body);
     return { outcome: "unknown" as const };
   } catch (e) {
@@ -86,14 +95,15 @@ export async function reserveStock(orderId: string, items: { productId: string; 
 }
 
 /** Put an order's lines back into the customer's cart (used whenever an order does not go ahead). */
+// While an order is PENDING the customer may already have put some of the same products back in the
+// cart. Adding the order's quantities on top would DOUBLE them (found in code review), so each line
+// becomes max(what is in the cart now, what was ordered) - never less than either.
 async function restoreCart(tx: Prisma.TransactionClient, userId: string, items: { productId: string; quantity: number }[]) {
   const cart = await tx.cart.upsert({ where: { userId }, create: { userId }, update: {} });
   for (const i of items) {
-    await tx.cartItem.upsert({
-      where: { cartId_productId: { cartId: cart.id, productId: i.productId } },
-      create: { cartId: cart.id, productId: i.productId, quantity: i.quantity },
-      update: { quantity: { increment: i.quantity } },
-    });
+    const current = await tx.cartItem.findUnique({ where: { cartId_productId: { cartId: cart.id, productId: i.productId } } });
+    if (!current) await tx.cartItem.create({ data: { cartId: cart.id, productId: i.productId, quantity: i.quantity } });
+    else if (current.quantity < i.quantity) await tx.cartItem.update({ where: { id: current.id }, data: { quantity: i.quantity } });
   }
 }
 
@@ -136,9 +146,10 @@ export const ordersService = {
     if (placed.replayed) return { order, replayed: true };
 
     const reserve = await reserveStock(order.id, order.items);
-    if (reserve.outcome === "insufficient_stock" || reserve.outcome === "unreachable") {
+    if (reserve.outcome === "insufficient_stock" || reserve.outcome === "unreachable" || reserve.outcome === "rejected") {
+      // We KNOW nothing was reserved: undo as if the order never existed.
       await ordersService.undoPlacement(order.id, userId);
-      if (reserve.outcome === "unreachable") throw inventoryDown();
+      if (reserve.outcome !== "insufficient_stock") throw inventoryDown();
       const item = order.items.find((i) => i.productId === reserve.productId);
       const name = item?.name ?? "An item";
       throw conflict("insufficient_stock", reserve.available === 0 ? `"${name}" is out of stock` : `Only ${reserve.available} left of "${name}"`);
@@ -183,6 +194,9 @@ export const ordersService = {
 
         const cart = await tx.cart.findUnique({ where: { userId }, include: { items: { include: { product: true } } } });
         if (!cart || cart.items.length === 0) throw badRequest("cart_empty", "Your cart is empty");
+        if (cart.items.length > MAX_ORDER_LINES) {
+          throw badRequest("too_many_items", `An order can contain at most ${MAX_ORDER_LINES} different products. Please split it into several orders.`);
+        }
         const inactive = cart.items.find((i) => !i.product.active);
         if (inactive) throw conflict("product_unavailable", `"${inactive.product.name}" is no longer available`);
 

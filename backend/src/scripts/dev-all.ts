@@ -35,7 +35,20 @@ if (unknown.length) {
   process.exit(1);
 }
 const names = wanted.length ? wanted : Object.keys(PROCESSES);
-const tsxCli = fileURLToPath(import.meta.resolve("tsx/cli"));
+
+// Two modes (found in code review: `npm start` used to run the dev watcher on the .ts sources):
+//  - dev   (npm run dev): this file runs as .ts via tsx -> children run the .ts sources via
+//          `tsx watch` (restart on save).
+//  - build (npm run build && npm start): this file is dist/src/scripts/dev-all.js -> children run
+//          the COMPILED dist/src/**/*.js with plain node: no tsx, no watching.
+// Paths are resolved from this file's location, so the current directory doesn't matter.
+const compiled = import.meta.url.endsWith(".js");
+const backendRoot = fileURLToPath(new URL(compiled ? "../../../" : "../../", import.meta.url));
+const tsxCli = compiled ? "" : fileURLToPath(import.meta.resolve("tsx/cli"));
+const argsFor = (p: { file: string; watch: boolean }) =>
+  compiled
+    ? [`dist/${p.file.replace(/\.ts$/, ".js")}`]
+    : [tsxCli, ...(p.watch ? ["watch", "--clear-screen=false"] : []), p.file];
 const width = Math.max(...names.map((n) => n.length));
 const children: ChildProcess[] = [];
 
@@ -50,9 +63,7 @@ names.forEach((name, i) => {
   // (they would reconnect on their own anyway - this just keeps the startup log tidy).
   const delay = p.watch ? 1500 + i * 150 : 0;
   setTimeout(() => {
-    const child = spawn(process.execPath, [tsxCli, ...(p.watch ? ["watch", "--clear-screen=false"] : []), p.file], {
-      env: { ...process.env, FORCE_COLOR: "1" },
-    });
+    const child = spawn(process.execPath, argsFor(p), { cwd: backendRoot, env: { ...process.env, FORCE_COLOR: "1" } });
     child.stdout.on("data", (c: Buffer) => prefixLines(name, p.color, c, process.stdout));
     child.stderr.on("data", (c: Buffer) => prefixLines(name, p.color, c, process.stderr));
     child.on("exit", (code) => prefixLines(name, p.color, Buffer.from(`exited (code ${code})`), process.stdout));

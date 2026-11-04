@@ -3,7 +3,7 @@ import express, { type RequestHandler } from "express";
 import helmet from "helmet";
 import { env } from "../../config/env.js";
 import { kv } from "../../config/kv.js";
-import { CONSUMER_GROUPS, GROUPS } from "../../events/workers.js";
+import { GROUPS, groupsOfService } from "../../events/workers.js";
 import { authenticate, requireRole } from "../../middleware/auth.js";
 import { errorHandler } from "../../middleware/errorHandler.js";
 import { limits } from "../../middleware/rateLimit.js";
@@ -99,7 +99,7 @@ export function createGatewayApp() {
         return {
           ...s,
           routes: ROUTES.filter((r) => r.service === s.service).map((r) => r.prefix),
-          groups: CONSUMER_GROUPS.filter((g) => GROUPS[g].service === s.service).map((g) => ({ group: g, topic: GROUPS[g].topic, description: GROUPS[g].description })),
+          groups: groupsOfService(s.service).map((g) => ({ group: g, topic: GROUPS[g].topic, description: GROUPS[g].description })),
           traffic: st
             ? { requests: st.requests, errors: st.errors, unavailable: st.unavailable, inFlight: st.inFlight, avgMs: st.requests ? Math.round(st.totalMs / st.requests) : 0, lastError: st.lastError }
             : { requests: 0, errors: 0, unavailable: 0, inFlight: 0, avgMs: 0, lastError: null },

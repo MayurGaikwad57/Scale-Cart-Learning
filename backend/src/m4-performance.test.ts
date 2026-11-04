@@ -197,6 +197,15 @@ describe("rate limiting (sliding window counter)", () => {
     expect(Number(blocked.headers["retry-after"])).toBeGreaterThan(0);
   });
 
+  it("a client can't dodge the per-IP login limit by faking X-Forwarded-For (code review fix)", async () => {
+    for (let i = 0; i < 10; i++) {
+      const res = await request(app).post("/auth/login").set("X-Forwarded-For", `10.0.0.${i}`).send({ email: `${RUN}-nobody@example.com`, password: "wrong-password" });
+      expect(res.status).toBe(401);
+    }
+    const blocked = await request(app).post("/auth/login").set("X-Forwarded-For", "10.0.0.99").send({ email: `${RUN}-nobody@example.com`, password: "wrong-password" });
+    expect(blocked.status).toBe(429); // every attempt counted against the REAL address
+  });
+
   it("limits checkout per USER: another user is not affected", async () => {
     const greedy = await makeUser();
     const other = await makeUser();

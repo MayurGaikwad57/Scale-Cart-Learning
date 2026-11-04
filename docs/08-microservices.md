@@ -136,7 +136,7 @@ release the stock). That is the idea of a **saga** — M7 formalises it.
 
 ## 5. Verification
 
-- **Backend: 111 tests** (was 97). Every test now goes **through the gateway to real service processes on random
+- **Backend: 111 tests** (was 97; 117 after the review fixes, see §6). Every test now goes **through the gateway to real service processes on random
   ports with a real broker** (`test-cluster.ts`). New `m6-microservices.test.ts` (14 tests): payment service down →
   orders wait PENDING → charged when it returns; gateway routing / correlation id / edge 401/403 / `/internal`
   blocked; internal token required; stopped service → 502 only for its routes, `/health/ready` = `degraded`;
@@ -148,7 +148,29 @@ release the stock). That is the idea of a **saga** — M7 formalises it.
   after ~1.8 s; decline restores cart). **Edge headless browser: 10/10** (processing screen → confirmed without
   reload, decline screen, admin *Services* with 4 services up, *Events* with 5 groups, 390 px phone layout).
 
-## 6. Interview questions
+## 6. Found in code review (PR #4) and fixed
+
+| # | Problem | Fix |
+|---|---|---|
+| 1 | After a reserve **timeout**, stock was given back only by a best-effort release + best-effort event. If both were lost, the units stayed `HELD` forever. | **Reservation sweeper** in the inventory service (`inventory/sweeper.ts`). Every 30 s it looks at reservations `HELD` for more than 2 min and asks the order service (`GET /internal/orders/:id/status`) what happened: CONFIRMED → commit, CANCELLED/absent → release, PENDING → leave. "Ask the source of truth, then repair." |
+| 2 | The gateway **appended** to the client's own `X-Forwarded-For`. Services trust loopback, so a faked header became `req.ip` and bypassed the per-IP login limit. | The gateway **replaces** the header with the one address it trusts (`req.ip`). Test: 11 logins with 11 fake IPs → the 11th is 429. |
+| 3 | `npm start` ran the dev watcher (`tsx watch` on `.ts`) instead of the build. | The launcher detects it runs from `dist/` and starts the compiled `.js` with plain node, cwd = backend root. |
+| 4 | A cart with more than 100 products → inventory 400 → treated as "unknown" → "inventory unavailable, try again" forever. | 400 `too_many_items` at checkout. Any other 4xx from inventory = "definitely nothing reserved" (undo), never "unknown". |
+| 5 | The reconciler took the 50 oldest PENDING orders, then skipped those backing off → 50 hopeless orders could starve newer ones. | Orders in backoff are excluded **in the query**. |
+| 6 | Restoring the cart added the order's quantities on top → items re-added while PENDING were **doubled**. | Each line becomes `max(cart now, ordered)`. |
+| 7 | Every payment failure became "payment declined"; a duplicate delivery lost the real reason. | Reason derived from the stored method; `payment_failed` vs `payment_declined`. |
+| 8 | A release didn't refresh low-stock alerts (stale alert after a cancel). | Release updates/clears existing alerts (but never *creates* one — a cancel is not a sale). |
+| 9 | A closed browser tab was counted as a service error / 502 on Admin › Services. | The proxy marks "client gone" and doesn't count it. |
+| 10 | Dead code (`publishOrderCreated` with random ids, `ORDERS_PARTITIONS`), duplicated group filter. | Removed; gateway uses `groupsOfService()`. |
+
+**Found by the new tests while fixing:** raw SQL wrote `now()` into a timestamp column. The database runs in
+**Asia/Calcutta** (+5:30) but Prisma stores **UTC**, so every reservation looked 5.5 hours younger than it was and the
+sweeper never saw it. Raw inserts now write `now() AT TIME ZONE 'UTC'`. Lesson: one time-zone convention
+everywhere, or use `timestamptz`.
+
+Tests after the fixes: **backend 117** (6 new regression tests), frontend 23.
+
+## 7. Interview questions
 
 1. **Why extract payment first, and why make it asynchronous?** *Hint:* independent failure mode, external latency,
    locks held during a slow call; customer gets an answer, events wait while the service is down.

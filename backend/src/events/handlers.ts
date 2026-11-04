@@ -64,7 +64,8 @@ const CANCEL_TEXT: Record<string, string> = {
   payment_declined: "was cancelled because the payment was declined. Your cart is still saved.",
   inventory_unavailable: "could not be completed because our stock system was unavailable. Nothing was charged and your cart is still saved.",
   reservation_released: "was cancelled because the reserved stock was released. Nothing was charged and your cart is still saved.",
-  out_of_stock: "was cancelled because an item sold out before it could be reserved. Nothing was charged and your cart is still saved.",
+  payment_failed: "was cancelled because the payment could not be processed. Nothing was charged and your cart is still saved.",
+  out_of_stock:"was cancelled because an item sold out before it could be reserved. Nothing was charged and your cart is still saved.",
 };
 
 /** notification service: tell the customer what happened to their order (the bell in the navbar). */

@@ -39,10 +39,16 @@ const statsOf = (s: ServiceName) =>
 // handshake on every request.
 const agent = new http.Agent({ keepAlive: true, maxSockets: 100 });
 
+/**
+ * The client address the services should see. We REPLACE any incoming X-Forwarded-For with the one
+ * address the gateway itself trusts (req.ip: the TCP peer, or - only if TRUST_PROXY is set - what a
+ * trusted load balancer in front of us reported). Appending instead would let a client write
+ * "X-Forwarded-For: 1.2.3.4" itself: the services trust the gateway (loopback), would take 1.2.3.4
+ * as the real IP, and a new fake IP per request would bypass the per-IP login rate limit
+ * (found in code review).
+ */
 function forwardedFor(req: Request) {
-  const prior = req.headers["x-forwarded-for"];
-  const client = req.socket.remoteAddress ?? "";
-  return prior ? `${prior}, ${client}` : client;
+  return req.ip ?? req.socket.remoteAddress ?? "";
 }
 
 export function proxyTo(service: ServiceName, opts: { timeoutMs?: number } = {}): RequestHandler {
@@ -54,6 +60,7 @@ export function proxyTo(service: ServiceName, opts: { timeoutMs?: number } = {})
     stats.requests++;
     stats.inFlight++;
     let finished = false;
+    let clientGone = false; // the browser disconnected before the answer was complete
     const done = (error?: string) => {
       if (finished) return;
       finished = true;
@@ -81,13 +88,16 @@ export function proxyTo(service: ServiceName, opts: { timeoutMs?: number } = {})
         res.writeHead(up.statusCode ?? 502, out);
         up.pipe(res);
         up.on("end", () => done((up.statusCode ?? 500) >= 500 ? `${service} answered ${up.statusCode}` : undefined));
-        up.on("error", () => done(`${service} response aborted`));
+        up.on("error", () => done(clientGone ? undefined : `${service} response aborted`));
       },
     );
 
     // `timeout` = no bytes for timeoutMs. Destroying the request triggers "error" below.
     upstream.on("timeout", () => upstream.destroy(Object.assign(new Error("timeout"), { code: "ETIMEDOUT" })));
     upstream.on("error", (err: NodeJS.ErrnoException) => {
+      // We aborted it ourselves because the browser left: not the service's fault, not a 502
+      // (found in code review: closed tabs were inflating the error counts on Admin > Services).
+      if (clientGone) return void done();
       const timedOut = err.code === "ETIMEDOUT";
       done(`${service}: ${err.code ?? err.message}`);
       if (res.headersSent) return void res.destroy(); // mid-response: all we can do is cut it
@@ -100,7 +110,10 @@ export function proxyTo(service: ServiceName, opts: { timeoutMs?: number } = {})
     });
     // Browser gave up (closed the tab): stop the upstream work too.
     res.on("close", () => {
-      if (!res.writableFinished) upstream.destroy();
+      if (!res.writableFinished) {
+        clientGone = true;
+        upstream.destroy();
+      }
     });
 
     req.pipe(upstream);

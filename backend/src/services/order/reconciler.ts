@@ -33,16 +33,22 @@ const attempts = new Map<string, { count: number; nextAt: number }>();
 export async function reconcileOnce(now = Date.now()) {
   reconcilerStats.runs++;
   reconcilerStats.lastRunAt = new Date(now).toISOString();
+  // Orders still backing off are excluded IN THE QUERY. Filtering them after "take 50" would let 50
+  // permanently failing orders fill every batch, and a newer stuck order would never be looked at
+  // (found in code review).
+  const backingOff = [...attempts.entries()].filter(([, a]) => a.nextAt > now).map(([id]) => id);
   const stuck = await prisma.order.findMany({
-    where: { status: "PENDING", createdAt: { lt: new Date(now - reconcilerSettings.stuckAfterMs) } },
+    where: { status: "PENDING", createdAt: { lt: new Date(now - reconcilerSettings.stuckAfterMs) }, id: { notIn: backingOff } },
     select: { id: true },
     orderBy: { createdAt: "asc" },
     take: 50,
   });
   for (const { id } of stuck) {
     const a = attempts.get(id);
-    if (a && a.nextAt > now) continue; // backing off
-    attempts.set(id, { count: (a?.count ?? 0) + 1, nextAt: now + Math.min(reconcilerSettings.stuckAfterMs * 2 ** (a?.count ?? 0), reconcilerSettings.maxBackoffMs) });
+    attempts.set(id, {
+      count: (a?.count ?? 0) + 1,
+      nextAt: now + Math.min(reconcilerSettings.stuckAfterMs * 2 ** (a?.count ?? 0), reconcilerSettings.maxBackoffMs),
+    });
 
     const order = await ordersService.get(id);
     if (!order || order.status !== "PENDING") continue;
@@ -58,9 +64,12 @@ export async function reconcileOnce(now = Date.now()) {
       }
     } // unknown / unreachable: next round
   }
-  // Forget orders that are no longer stuck.
-  const stuckIds = new Set(stuck.map((s) => s.id));
-  for (const id of attempts.keys()) if (!stuckIds.has(id)) attempts.delete(id);
+  // Forget orders that are no longer PENDING (bounded memory).
+  if (attempts.size) {
+    const stillPending = await prisma.order.findMany({ where: { id: { in: [...attempts.keys()] }, status: "PENDING" }, select: { id: true } });
+    const keep = new Set(stillPending.map((o) => o.id));
+    for (const id of [...attempts.keys()]) if (!keep.has(id)) attempts.delete(id);
+  }
   return stuck.length;
 }
 

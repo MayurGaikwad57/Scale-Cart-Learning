@@ -4,7 +4,25 @@ import { ordersRouter } from "../../modules/orders/orders.routes.js";
 import { productsRouter } from "../../modules/products/products.routes.js";
 import { systemRouter } from "../../modules/system/system.routes.js";
 import { authRouter } from "../../modules/users/users.routes.js";
+import { Router } from "express";
+import { z } from "zod";
+import { prisma } from "../../config/prisma.js";
+import { uuid } from "../../utils/validation.js";
+import { requireInternal } from "../shared/internal-auth.js";
 import { createServiceApp } from "../shared/service-app.js";
+
+/**
+ * Internal API for other services. The inventory service's SWEEPER asks "what happened to this
+ * order?" for reservations that have been HELD too long (inventory/sweeper.ts).
+ */
+const internal = Router();
+internal.use(requireInternal);
+internal.get("/orders/:id/status", async (req, res) => {
+  const { id } = z.object({ id: uuid }).parse(req.params);
+  const order = await prisma.order.findUnique({ where: { id }, select: { status: true } });
+  if (!order) return res.status(404).json({ error: "order_not_found" });
+  res.json({ status: order.status });
+});
 
 /**
  * ORDER SERVICE (:3001) - what is left of the M1-M5 monolith after extracting payment, inventory
@@ -22,4 +40,5 @@ export const createOrderApp = () =>
     app.use("/orders", ordersRouter);
     app.use("/admin/system", systemRouter);
     app.use("/admin/events", eventsRouter);
+    app.use("/internal", internal);
   });

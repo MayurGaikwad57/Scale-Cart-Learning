@@ -56,11 +56,19 @@ export class InsufficientStockError extends Error {
 /** 409 reservation_released: the order was already cancelled (see THE TOMBSTONE). */
 export class ReservationReleasedError extends Error {}
 
-/** Low-stock alerts (moved here from the M5 "inventory" consumer): read the CURRENT stock. */
-async function refreshStockAlerts(tx: Prisma.TransactionClient, productIds: string[], orderId: string) {
+/**
+ * Low-stock alerts (moved here from the M5 "inventory" consumer): read the CURRENT stock.
+ * on "sale" (commit): raise / update / clear alerts. on "release": only update or clear EXISTING
+ * ones - an alert means "ran low after a SALE"; a cancelled order sold nothing.
+ */
+async function refreshStockAlerts(tx: Prisma.TransactionClient, productIds: string[], orderId: string, on: "sale" | "release") {
   const rows = await tx.inventory.findMany({ where: { productId: { in: productIds } } });
   for (const r of rows) {
     if (r.available <= LOW_STOCK_THRESHOLD) {
+      if (on === "release") {
+        await tx.stockAlert.updateMany({ where: { productId: r.productId }, data: { available: r.available } });
+        continue;
+      }
       await tx.stockAlert.upsert({
         where: { productId: r.productId },
         create: { productId: r.productId, available: r.available, lastOrderId: orderId },
@@ -72,10 +80,13 @@ async function refreshStockAlerts(tx: Prisma.TransactionClient, productIds: stri
   }
 }
 
+// Timestamps: Prisma stores DateTime in these "timestamp without time zone" columns as UTC. A plain
+// now() would store the DATABASE's local time (Asia/Calcutta here: +5:30) - the sweeper then thought
+// every reservation was 5.5 hours younger than it was. So raw SQL writes UTC explicitly.
 const claim = (tx: Prisma.TransactionClient, orderId: string, status: "HELD" | "RELEASED") =>
   tx.$queryRaw<{ order_id: string }[]>`
-    INSERT INTO reservations (order_id, status, updated_at)
-    VALUES (${orderId}::uuid, ${status}::"ReservationStatus", now())
+    INSERT INTO reservations (order_id, status, created_at, updated_at)
+    VALUES (${orderId}::uuid, ${status}::"ReservationStatus", now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC')
     ON CONFLICT DO NOTHING
     RETURNING order_id`;
 
@@ -158,7 +169,7 @@ export const reservations = {
         });
       }
       await tx.reservation.update({ where: { orderId }, data: { status: "COMMITTED" } });
-      await refreshStockAlerts(tx, r.items.map((i) => i.productId), orderId);
+      await refreshStockAlerts(tx, r.items.map((i) => i.productId), orderId, "sale");
       return "committed";
     });
   },
@@ -184,6 +195,9 @@ export const reservations = {
       }
       await tx.reservation.update({ where: { orderId }, data: { status: "RELEASED" } });
       productIds = r.items.map((i) => i.productId);
+      // Stock went UP: an alert raised while these units were held may no longer be true
+      // (found in code review - alerts were only recomputed on commit).
+      await refreshStockAlerts(tx, productIds, orderId, "release");
       return "released" as const;
     });
     if (productIds.length) await invalidateProducts(productIds, { catalog: false });

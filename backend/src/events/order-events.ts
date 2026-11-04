@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { broker } from "../config/broker.js";
 import { brokerErrorCode } from "../log/client.js";
 import { currentRequestId } from "../services/shared/request-context.js";
@@ -25,8 +25,6 @@ import { currentRequestId } from "../services/shared/request-context.js";
 export const ORDERS_TOPIC = "orders";
 export const PAYMENTS_TOPIC = "payments";
 export const TOPIC_PARTITIONS = 3;
-/** @deprecated name kept for M5 code/tests: same as TOPIC_PARTITIONS. */
-export const ORDERS_PARTITIONS = TOPIC_PARTITIONS;
 
 export interface EventEnvelope<TType extends string, TData> {
   eventId: string; // unique per FACT -> lets consumers detect duplicates
@@ -142,24 +140,4 @@ export async function publishEvent(topic: string, event: AnyEvent, mode: "best-e
     console.warn(`[events] ${event.type} for ${key} NOT published: ${(e as Error).message}`);
     return false;
   }
-}
-
-/** M5 helper, kept for compatibility: publishes a v1-style OrderCreated with a random id. */
-export async function publishOrderCreated(
-  order: { id: string; status: OrderCreatedData["status"]; totalCents: number; items: OrderLine[] },
-  userId: string,
-): Promise<boolean> {
-  const event = makeEvent<OrderCreated>(
-    "OrderCreated",
-    1,
-    {
-      orderId: order.id,
-      userId,
-      status: order.status,
-      totalCents: order.totalCents,
-      items: order.items.map((i) => ({ productId: i.productId, name: i.name, quantity: i.quantity, unitPriceCents: i.unitPriceCents })),
-    },
-    randomUUID(),
-  );
-  return publishEvent(ORDERS_TOPIC, event);
 }

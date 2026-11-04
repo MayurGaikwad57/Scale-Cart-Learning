@@ -1,5 +1,5 @@
 import { makeEvent, PAYMENTS_TOPIC, publishEvent, type OrderEvent, type PaymentFailed, type PaymentSucceeded } from "../../events/order-events.js";
-import { paymentsService } from "../../modules/payments/payments.service.js";
+import { failureReason, paymentsService } from "../../modules/payments/payments.service.js";
 
 /**
  * Consumer group "payment" (runs in the Payment Service) on the "orders" topic.
@@ -20,13 +20,14 @@ export async function paymentHandler(e: OrderEvent) {
   if (e.type !== "OrderCreated" || e.data.status !== "PENDING") return "skipped";
   const { orderId, totalCents, paymentMethod } = e.data;
 
-  const { payment, reason } = await paymentsService.chargeOnce({ orderId, amountCents: totalCents, method: paymentMethod ?? "unknown" });
+  const { payment } = await paymentsService.chargeOnce({ orderId, amountCents: totalCents, method: paymentMethod ?? "unknown" });
+  const reason = failureReason(payment.method);
   const data = { orderId, paymentId: payment.id, amountCents: payment.amountCents, providerRef: payment.providerRef ?? "" };
 
   const result =
     payment.status === "SUCCEEDED"
       ? makeEvent<PaymentSucceeded>("PaymentSucceeded", 1, data)
-      : makeEvent<PaymentFailed>("PaymentFailed", 1, { ...data, reason: reason ?? "card_declined" });
+      : makeEvent<PaymentFailed>("PaymentFailed", 1, { ...data, reason });
   await publishEvent(PAYMENTS_TOPIC, result, "must");
   return payment.status;
 }

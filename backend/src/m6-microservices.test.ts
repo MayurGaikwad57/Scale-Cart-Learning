@@ -11,6 +11,8 @@ import { makeEvent, ORDERS_TOPIC, publisherStats, publishEvent, type OrderCreate
 import { startWorkers } from "./events/workers.js";
 import { serviceUrls } from "./services/registry.js";
 import { reconcileOnce } from "./services/order/reconciler.js";
+import { sweepOnce } from "./services/inventory/sweeper.js";
+import { MAX_ORDER_LINES, ordersService } from "./modules/orders/orders.service.js";
 import { eventually, settle, startCluster, type Cluster } from "./test-cluster.js";
 import { cleanup, makeProduct, makeUser } from "./test-utils.js";
 
@@ -284,5 +286,95 @@ describe("lost and duplicate events", () => {
     const all = [...(await headersOf(ORDERS_TOPIC)), ...(await headersOf("payments"))];
     expect(all.map((h) => h["x-event-type"]).sort()).toEqual(["OrderConfirmed", "OrderCreated", "PaymentSucceeded"]);
     expect(all.every((h) => h["x-request-id"] === "checkout-trace-42")).toBe(true);
+  });
+});
+
+describe("code-review fixes (PR #4)", () => {
+  /** An order row in PENDING, created directly (no checkout), for testing one step in isolation. */
+  const pendingOrder = (u: U, productId: string, quantity: number, paymentMethod = "TEST_CARD_SUCCESS") =>
+    prisma.order.create({
+      data: { userId: u.user.id, totalCents: 1000 * quantity, paymentMethod, items: { create: [{ productId, quantity, unitPriceCents: 1000 }] } },
+    });
+  const reserveDirect = (orderId: string, productId: string, quantity: number) =>
+    fetch(`${serviceUrls.inventory}/internal/reservations`, {
+      method: "POST",
+      headers: { ...internal, "content-type": "application/json" },
+      body: JSON.stringify({ orderId, items: [{ productId, quantity }] }),
+    });
+
+  it("the inventory SWEEPER repairs reservations left HELD by lost events", async () => {
+    const u = await makeUser();
+    const p = await makeProduct(20);
+    const cancelled = await pendingOrder(u, p.id, 2);
+    const confirmed = await pendingOrder(u, p.id, 3);
+    const pending = await pendingOrder(u, p.id, 1);
+    const ghost = randomUUID(); // a reservation whose order doesn't exist (any more)
+    for (const [id, q] of [[cancelled.id, 2], [confirmed.id, 3], [pending.id, 1], [ghost, 4]] as const) {
+      expect((await reserveDirect(id, p.id, q)).status).toBe(201);
+    }
+    // The order service decided - but the OrderCancelled / OrderConfirmed events were "lost".
+    await prisma.order.update({ where: { id: cancelled.id }, data: { status: "CANCELLED" } });
+    await prisma.order.update({ where: { id: confirmed.id }, data: { status: "CONFIRMED" } });
+    expect(await stock(p.id)).toMatchObject({ available: 10, reserved: 10 });
+
+    await sweepOnce(Date.now() + 3 * 60_000); // "3 minutes later"
+    const status = async (id: string) => (await prisma.reservation.findUniqueOrThrow({ where: { orderId: id } })).status;
+    expect(await status(cancelled.id)).toBe("RELEASED");
+    expect(await status(ghost)).toBe("RELEASED");
+    expect(await status(confirmed.id)).toBe("COMMITTED");
+    expect(await status(pending.id)).toBe("HELD"); // still in progress: left alone
+    expect(await stock(p.id)).toMatchObject({ available: 16, reserved: 1 });
+    await prisma.order.update({ where: { id: pending.id }, data: { status: "CANCELLED" } }); // keep the reconciler away
+    await prisma.reservation.delete({ where: { orderId: ghost } });
+  });
+
+  it("cancelling restores the cart WITHOUT doubling items re-added meanwhile", async () => {
+    const u = await makeUser();
+    const p = await makeProduct(20);
+    const order = await pendingOrder(u, p.id, 2);
+    await request(app).post("/cart/items").set(u.auth).send({ productId: p.id, quantity: 2 }).expect(201); // re-added while PENDING
+    await ordersService.cancel(order.id, "payment_declined", "FAILED");
+    const cart = (await request(app).get("/cart").set(u.auth)).body;
+    expect(cart.itemCount).toBe(2); // not 4
+  });
+
+  it("a non-card payment failure is not reported as 'payment declined'", async () => {
+    const u = await makeUser();
+    const p = await makeProduct(5);
+    const order = await pendingOrder(u, p.id, 1, "BITCOIN");
+    await reserveDirect(order.id, p.id, 1);
+    const event = makeEvent<OrderCreated>("OrderCreated", 2, {
+      orderId: order.id,
+      userId: u.user.id,
+      status: "PENDING",
+      totalCents: 1000,
+      paymentMethod: "BITCOIN",
+      items: [{ productId: p.id, name: "x", quantity: 1, unitPriceCents: 1000 }],
+    });
+    await publishEvent(ORDERS_TOPIC, event, "must");
+    const final = await settle(app, u.auth, order.id);
+    expect(final).toMatchObject({ status: "CANCELLED", statusReason: "payment_failed" });
+    await eventually(async () => (await stock(p.id)).available === 5);
+  });
+
+  it("a release refreshes low-stock alerts (stock went back up)", async () => {
+    const p = await makeProduct(7);
+    const orderId = randomUUID();
+    await reserveDirect(orderId, p.id, 3); // available 4
+    await prisma.stockAlert.create({ data: { productId: p.id, available: 4 } }); // raised while held
+    await fetch(`${serviceUrls.inventory}/internal/reservations/${orderId}/release`, { method: "POST", headers: internal });
+    expect(await prisma.stockAlert.findUnique({ where: { productId: p.id } })).toBeNull(); // 7 > threshold
+    await prisma.reservation.delete({ where: { orderId } });
+  });
+
+  it(`a cart with more than ${MAX_ORDER_LINES} products gets a clear 400, not 'inventory unavailable'`, async () => {
+    const u = await makeUser();
+    const products = await Promise.all(Array.from({ length: MAX_ORDER_LINES + 1 }, () => makeProduct(1)));
+    const cart = await prisma.cart.create({ data: { userId: u.user.id } });
+    await prisma.cartItem.createMany({ data: products.map((p) => ({ cartId: cart.id, productId: p.id, quantity: 1 })) });
+    const res = await request(app).post("/orders").set(u.auth).send({ paymentMethod: "TEST_CARD_SUCCESS" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("too_many_items");
+    expect(await prisma.order.count({ where: { userId: u.user.id } })).toBe(0);
   });
 });

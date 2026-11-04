@@ -28,6 +28,14 @@ async function providerCharge(req: { idempotencyKey: string; amountCents: number
   return { status: "FAILED" as const, providerRef, reason: "unsupported_method" };
 }
 
+/**
+ * Why a payment failed. Derived from the stored method, so a DUPLICATE delivery (which returns the
+ * saved row instead of calling the provider again) reports the same reason as the first one
+ * (found in code review: it always said "card_declined").
+ */
+export const failureReason = (method: string | null) =>
+  (PAYMENT_METHODS as readonly string[]).includes(method ?? "") ? "card_declined" : "unsupported_method";
+
 export const paymentsService = {
   /**
    * Charge an order AT MOST ONCE, however many times its OrderCreated event arrives.

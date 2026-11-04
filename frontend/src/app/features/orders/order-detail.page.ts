@@ -17,6 +17,7 @@ interface Step { label: string; state: 'done' | 'fail' | 'todo'; icon: IconName 
 // Why a cancelled order was cancelled (statusReason from the order service).
 const CANCEL_REASON: Record<string, string> = {
   payment_declined: 'The payment was declined.',
+  payment_failed: 'The payment could not be processed. Nothing was charged.',
   inventory_unavailable: 'Our stock system was unavailable, so the order could not be completed. Nothing was charged.',
   out_of_stock: 'An item sold out before it could be reserved for you. Nothing was charged.',
   reservation_released: 'The reserved stock was released before payment completed. Nothing was charged.',
