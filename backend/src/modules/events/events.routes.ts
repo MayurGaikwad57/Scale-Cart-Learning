@@ -3,8 +3,8 @@ import { z } from "zod";
 import { broker } from "../../config/broker.js";
 import { kv } from "../../config/kv.js";
 import { prisma } from "../../config/prisma.js";
-import { publisherStats, ORDERS_TOPIC } from "../../events/order-events.js";
-import { chaosKey, CONSUMER_GROUPS, runningConsumers, type ConsumerGroup } from "../../events/workers.js";
+import { publisherStats } from "../../events/order-events.js";
+import { chaosKey, CONSUMER_GROUPS, dlqTopicOf, GROUPS, runningConsumers, type ConsumerGroup } from "../../events/workers.js";
 import { authenticate, requireRole } from "../../middleware/auth.js";
 import { validateBody } from "../../middleware/validate.js";
 import { HttpError } from "../../utils/errors.js";
@@ -15,7 +15,7 @@ eventsRouter.use(authenticate, requireRole("ADMIN"));
 
 const unavailable = () => new HttpError(503, "broker_unavailable", "The ScaleLog broker is not connected. Start it with: npm run log");
 const groupParam = z.object({ group: z.enum(CONSUMER_GROUPS) });
-const dlqTopic = (group: string) => `${ORDERS_TOPIC}.${group}.dlq`;
+const dlqTopic = dlqTopicOf;
 // The DLQ itself is consumed by a "replayer" group whose committed offset marks "replayed up to here".
 const replayGroup = (group: string) => `replay.${group}`;
 
@@ -26,7 +26,9 @@ eventsRouter.get("/", async (_req, res) => {
     broker: { status: broker.conn.status, url: broker.conn.url ?? null },
     cluster: broker.isReady ? await broker.describe().catch(() => null) : null,
     publisher: publisherStats,
-    // Consumers running inside THIS API process (a `npm run worker` process has its own).
+    // M6: every group, the topic it reads and the SERVICE that runs it (each service runs its own).
+    groups: CONSUMER_GROUPS.map((g) => ({ group: g, topic: GROUPS[g].topic, service: GROUPS[g].service, description: GROUPS[g].description })),
+    // Consumers running inside THIS process (the order service). Admin > Services shows all of them.
     localConsumers: runningConsumers.map((c) => ({
       group: c.group,
       memberId: c.memberId,
@@ -85,8 +87,8 @@ eventsRouter.get("/dlq/:group", async (req, res) => {
 });
 
 /**
- * REPLAY: put every waiting DLQ event back on the main topic, then move the replayer's offset to
- * the end of the DLQ. All three groups will see these events again - the groups that already
+ * REPLAY: put every waiting DLQ event back on the group's topic, then move the replayer's offset to
+ * the end of the DLQ. Every group of that topic sees these events again - the groups that already
  * processed them skip them (idempotent consumers), only the failed group does the work now.
  */
 eventsRouter.post("/dlq/:group/replay", async (req, res) => {
@@ -95,7 +97,7 @@ eventsRouter.post("/dlq/:group/replay", async (req, res) => {
   const s = await dlqState(group);
   for (const r of s.waiting) {
     const headers = { ...r.headers, "x-replayed-from": `${s.topic}@${r.offset}` };
-    await broker.produce(ORDERS_TOPIC, r.key, r.value, headers);
+    await broker.produce(GROUPS[group].topic, r.key, r.value, headers);
   }
   const last = s.waiting.at(-1);
   if (last) await broker.setOffset(replayGroup(group), s.topic, 0, last.offset + 1);

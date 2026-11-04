@@ -2,7 +2,7 @@ import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { toObservable, toSignal } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
-import { catchError, map, of, startWith, switchMap } from 'rxjs';
+import { catchError, EMPTY, expand, map, of, startWith, switchMap, take, timer } from 'rxjs';
 import { errorMessage } from '../../core/http-error';
 import { Order } from '../../core/models';
 import { OrdersService } from '../../core/services/orders.service';
@@ -14,7 +14,20 @@ import { MoneyPipe } from '../../shared/pipes/money.pipe';
 type State = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ok'; order: Order };
 interface Step { label: string; state: 'done' | 'fail' | 'todo'; icon: IconName }
 
+// Why a cancelled order was cancelled (statusReason from the order service).
+const CANCEL_REASON: Record<string, string> = {
+  payment_declined: 'The payment was declined.',
+  payment_failed: 'The payment could not be processed. Nothing was charged.',
+  inventory_unavailable: 'Our stock system was unavailable, so the order could not be completed. Nothing was charged.',
+  out_of_stock: 'An item sold out before it could be reserved for you. Nothing was charged.',
+  reservation_released: 'The reserved stock was released before payment completed. Nothing was charged.',
+};
+const POLL_MS = 1000;
+const MAX_POLLS = 120; // stop asking after ~2 minutes (the page can be refreshed)
+
 // Doubles as the "Order confirmation" page: checkout redirects here with ?placed=1.
+// M6: payment is ASYNCHRONOUS (a separate payment service, via events), so a new order arrives
+// here as PENDING. The page asks again every second until it is CONFIRMED or CANCELLED.
 @Component({
   selector: 'app-order-detail-page',
   imports: [RouterLink, DatePipe, MoneyPipe, OrderStatusBadge, Icon, ProductArt],
@@ -38,7 +51,13 @@ interface Step { label: string; state: 'done' | 'fail' | 'todo'; icon: IconName 
       @default {
         @if (order(); as o) {
           @if (placed()) {
-            @if (o.status === 'CONFIRMED') {
+            @if (o.status === 'PENDING') {
+              <div class="sc-card sc-celebrate mb-4" style="background: linear-gradient(180deg, var(--sc-warn-50, #fffbeb), #fff)" data-testid="order-processing">
+                <div class="sc-celebrate-icon sc-spin-slow" style="background: linear-gradient(135deg, #f59e0b, #d97706)"><app-icon name="refresh" [size]="38" /></div>
+                <h2 class="fw-bold">Order placed - processing your payment…</h2>
+                <p class="sc-muted mb-0">Your items are reserved. The payment service is charging your card; this page updates by itself.</p>
+              </div>
+            } @else if (o.status === 'CONFIRMED') {
               <div class="sc-card sc-celebrate mb-4" style="background: linear-gradient(180deg, var(--sc-success-50), #fff)">
                 <div class="sc-celebrate-icon" style="background: linear-gradient(135deg, #10b981, #059669)"><app-icon name="check" [size]="38" /></div>
                 <h2 class="fw-bold">Thank you! Your order is confirmed</h2>
@@ -47,8 +66,8 @@ interface Step { label: string; state: 'done' | 'fail' | 'todo'; icon: IconName 
             } @else {
               <div class="sc-card sc-celebrate mb-4" style="background: linear-gradient(180deg, var(--sc-danger-50), #fff)">
                 <div class="sc-celebrate-icon" style="background: linear-gradient(135deg, #f43f5e, #be123c)"><app-icon name="x" [size]="38" /></div>
-                <h2 class="fw-bold">Payment was declined</h2>
-                <p class="sc-muted mb-3">The order was cancelled and the reserved stock was released. Your cart is unchanged.</p>
+                <h2 class="fw-bold">{{ o.statusReason === 'payment_declined' ? 'Payment was declined' : 'Order cancelled' }}</h2>
+                <p class="sc-muted mb-3">{{ o.statusReason === 'payment_declined' ? '' : reasonText() }} The order was cancelled, any reserved stock was released, and your items are back in your cart.</p>
                 <a routerLink="/checkout" class="sc-btn sc-btn-primary">Try again <app-icon name="arrowRight" [size]="18" /></a>
               </div>
             }
@@ -64,6 +83,9 @@ interface Step { label: string; state: 'done' | 'fail' | 'todo'; icon: IconName 
                   </div>
                   <app-order-status-badge [status]="o.status" />
                 </div>
+                @if (o.status === 'CANCELLED' && reasonText() && !placed()) {
+                  <div class="sc-alert sc-alert-danger mb-3 small"><app-icon name="alert" [size]="18" /><span>{{ reasonText() }}</span></div>
+                }
                 <ol class="sc-timeline" aria-label="Order progress">
                   @for (s of steps(); track s.label) {
                     <li class="sc-tl-step" [class.done]="s.state === 'done'" [class.fail]="s.state === 'fail'">
@@ -105,6 +127,11 @@ interface Step { label: string; state: 'done' | 'fail' | 'todo'; icon: IconName 
       }
     }
   `,
+  styles: `
+    .sc-spin-slow app-icon { display: inline-flex; animation: sc-spin 1.4s linear infinite; }
+    @keyframes sc-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .sc-spin-slow app-icon { animation: none; } }
+  `,
 })
 export class OrderDetailPage {
   private readonly orders = inject(OrdersService);
@@ -116,6 +143,9 @@ export class OrderDetailPage {
     toObservable(this.id).pipe(
       switchMap((id) =>
         this.orders.get(id).pipe(
+          // While PENDING: ask again in a second (expand = "for every answer, maybe make another request").
+          expand((o) => (o.status === 'PENDING' ? timer(POLL_MS).pipe(switchMap(() => this.orders.get(id))) : EMPTY)),
+          take(MAX_POLLS),
           map((order): State => ({ status: 'ok', order })),
           catchError((e) => of<State>({ status: 'error', message: errorMessage(e) })),
           startWith<State>({ status: 'loading' }),
@@ -132,6 +162,7 @@ export class OrderDetailPage {
     const s = this.state();
     return s.status === 'error' ? s.message : '';
   });
+  protected readonly reasonText = computed(() => CANCEL_REASON[this.order()?.statusReason ?? ''] ?? '');
   protected readonly itemCount = computed(() => this.order()?.items.reduce((n, i) => n + i.quantity, 0) ?? 0);
 
   // Timeline derived from the order: placed -> payment -> final outcome.
@@ -139,9 +170,15 @@ export class OrderDetailPage {
     const o = this.order();
     if (!o) return [];
     const pay = o.payment?.status;
+    const stockFailed = o.status === 'CANCELLED' && o.statusReason !== null && o.statusReason !== 'payment_declined';
     return [
       { label: 'Order placed', state: 'done', icon: 'package' },
-      { label: pay === 'FAILED' ? 'Payment declined' : 'Payment', state: pay === 'SUCCEEDED' ? 'done' : pay === 'FAILED' ? 'fail' : 'todo', icon: pay === 'FAILED' ? 'x' : 'card' },
+      { label: stockFailed ? 'Stock not reserved' : 'Stock reserved', state: stockFailed ? 'fail' : 'done', icon: stockFailed ? 'x' : 'layers' },
+      {
+        label: pay === 'FAILED' ? 'Payment declined' : pay === 'PENDING' && o.status === 'PENDING' ? 'Payment processing…' : 'Payment',
+        state: pay === 'SUCCEEDED' ? 'done' : pay === 'FAILED' ? 'fail' : 'todo',
+        icon: pay === 'FAILED' ? 'x' : 'card',
+      },
       { label: o.status === 'CANCELLED' ? 'Cancelled' : 'Confirmed', state: o.status === 'CONFIRMED' ? 'done' : o.status === 'CANCELLED' ? 'fail' : 'todo', icon: o.status === 'CANCELLED' ? 'x' : 'check' },
     ];
   });

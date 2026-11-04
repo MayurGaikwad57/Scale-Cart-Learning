@@ -1,20 +1,37 @@
+import type { Express } from "express";
 import request from "supertest";
-import { afterAll, describe, expect, it } from "vitest";
-import { createApp } from "../../app.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../config/prisma.js";
+import { eventually, settle, startCluster, type Cluster } from "../../test-cluster.js";
 import { cleanup, makeProduct, makeUser } from "../../test-utils.js";
 
-const app = createApp();
+// M6: the full system - gateway, order/payment/inventory/notification services, real ScaleLog
+// broker and every consumer group. Checkout answers PENDING; payment happens asynchronously.
+let cluster: Cluster;
+let app: Express;
+beforeAll(async () => {
+  cluster = await startCluster({ log: true });
+  app = cluster.gateway;
+});
 afterAll(async () => {
-  await cleanup();
-  await prisma.$disconnect();
+  try {
+    await cluster.close();
+  } finally {
+    await cleanup();
+    await prisma.$disconnect();
+  }
 });
 
-const addToCart = (u: Awaited<ReturnType<typeof makeUser>>, productId: string, quantity = 1) =>
-  request(app).post("/cart/items").set(u.auth).send({ productId, quantity });
-const checkout = (u: Awaited<ReturnType<typeof makeUser>>, paymentMethod = "TEST_CARD_SUCCESS") =>
-  request(app).post("/orders").set(u.auth).send({ paymentMethod });
+type U = Awaited<ReturnType<typeof makeUser>>;
+const addToCart = (u: U, productId: string, quantity = 1) => request(app).post("/cart/items").set(u.auth).send({ productId, quantity });
+const checkout = (u: U, paymentMethod = "TEST_CARD_SUCCESS") => request(app).post("/orders").set(u.auth).send({ paymentMethod });
 const stock = (productId: string) => prisma.inventory.findUniqueOrThrow({ where: { productId } });
+/** Wait until the asynchronous consumers brought the stock to the expected numbers. */
+const stockBecomes = (productId: string, want: { available: number; reserved: number }) =>
+  eventually(async () => {
+    const s = await stock(productId);
+    return s.available === want.available && s.reserved === want.reserved;
+  });
 
 describe("cart", () => {
   it("adds, merges duplicates, updates, removes, and computes totals", async () => {
@@ -55,19 +72,24 @@ describe("cart", () => {
   });
 });
 
-describe("checkout: happy path", () => {
-  it("creates a CONFIRMED order, sells the stock, snapshots prices, empties the cart", async () => {
+describe("checkout: happy path (asynchronous payment)", () => {
+  it("answers PENDING with stock RESERVED, then becomes CONFIRMED and the stock SOLD", async () => {
     const u = await makeUser();
     const p = await makeProduct(5, { priceCents: 1200 });
     await addToCart(u, p.id, 2);
     const res = await checkout(u);
     expect(res.status).toBe(201);
-    expect(res.body.status).toBe("CONFIRMED");
+    expect(res.body.status).toBe("PENDING");
     expect(res.body.totalCents).toBe(2400);
     expect(res.body.items[0]).toMatchObject({ quantity: 2, unitPriceCents: 1200 });
-    expect(res.body.payment).toEqual({ status: "SUCCEEDED", amountCents: 2400 });
-    expect(await stock(p.id)).toMatchObject({ available: 3, reserved: 0 });
-    expect((await request(app).get("/cart").set(u.auth)).body.items).toHaveLength(0);
+    expect(res.body.payment).toEqual({ status: "PENDING", amountCents: 2400 });
+    expect((await request(app).get("/cart").set(u.auth)).body.items).toHaveLength(0); // cart became the order
+
+    const final = await settle(app, u.auth, res.body.id);
+    expect(final.status).toBe("CONFIRMED");
+    expect(final.payment).toEqual({ status: "SUCCEEDED", amountCents: 2400 });
+    await stockBecomes(p.id, { available: 3, reserved: 0 }); // inventory service committed the reservation
+    expect(await prisma.payment.count({ where: { orderId: res.body.id } })).toBe(1);
 
     // Changing the price later must not rewrite history.
     await prisma.product.update({ where: { id: p.id }, data: { priceCents: 9999 } });
@@ -100,22 +122,26 @@ describe("checkout: happy path", () => {
   });
 });
 
-describe("checkout: payment failure (compensation)", () => {
-  it("cancels the order, releases the reserved stock, and keeps the cart for a retry", async () => {
+describe("checkout: payment failure (compensation across services)", () => {
+  it("cancels the order, releases the reserved stock, and restores the cart for a retry", async () => {
     const u = await makeUser();
     const p = await makeProduct(4);
     await addToCart(u, p.id, 3);
     const res = await checkout(u, "TEST_CARD_DECLINE");
     expect(res.status).toBe(201);
-    expect(res.body.status).toBe("CANCELLED");
-    expect(res.body.payment.status).toBe("FAILED");
-    expect(await stock(p.id)).toMatchObject({ available: 4, reserved: 0 }); // fully restored
-    expect((await request(app).get("/cart").set(u.auth)).body.itemCount).toBe(3);
-    expect((await checkout(u, "TEST_CARD_SUCCESS")).body.status).toBe("CONFIRMED"); // retry works
+    expect(res.body.status).toBe("PENDING");
+
+    const final = await settle(app, u.auth, res.body.id);
+    expect(final).toMatchObject({ status: "CANCELLED", statusReason: "payment_declined", payment: { status: "FAILED" } });
+    await stockBecomes(p.id, { available: 4, reserved: 0 }); // fully restored by the inventory service
+    expect((await request(app).get("/cart").set(u.auth)).body.itemCount).toBe(3); // cart is back
+
+    const retry = await checkout(u, "TEST_CARD_SUCCESS");
+    expect((await settle(app, u.auth, retry.body.id)).status).toBe("CONFIRMED"); // retry works
   });
 });
 
-describe("checkout: concurrency (the reason we use row locks)", () => {
+describe("checkout: concurrency (row locks, now inside the inventory service)", () => {
   it("two buyers, one item left: exactly one wins, stock never goes negative", async () => {
     const p = await makeProduct(1);
     const [a, b] = await Promise.all([makeUser(), makeUser()]);
@@ -123,9 +149,11 @@ describe("checkout: concurrency (the reason we use row locks)", () => {
     await addToCart(b, p.id);
     const results = await Promise.all([checkout(a), checkout(b)]);
     expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
-    expect(results.find((r) => r.status === 409)!.body.error).toBe("insufficient_stock");
-    expect(await stock(p.id)).toMatchObject({ available: 0, reserved: 0 });
-    expect(await prisma.orderItem.count({ where: { productId: p.id } })).toBe(1);
+    const loser = results.find((r) => r.status === 409)!;
+    expect(loser.body.error).toBe("insufficient_stock");
+    expect(loser.body.message).toContain("out of stock"); // the order service added the product name
+    await stockBecomes(p.id, { available: 0, reserved: 0 });
+    expect(await prisma.orderItem.count({ where: { productId: p.id } })).toBe(1); // the loser's order was undone
   });
 
   it("10 buyers, 3 items: exactly 3 orders succeed", async () => {
@@ -135,21 +163,23 @@ describe("checkout: concurrency (the reason we use row locks)", () => {
     const results = await Promise.all(users.map((u) => checkout(u)));
     expect(results.filter((r) => r.status === 201)).toHaveLength(3);
     expect(results.filter((r) => r.status === 409)).toHaveLength(7);
-    expect(await stock(p.id)).toMatchObject({ available: 0, reserved: 0 });
+    await stockBecomes(p.id, { available: 0, reserved: 0 });
   });
 
   it("carts sharing products in different orders do not deadlock", async () => {
     const [p1, p2] = await Promise.all([makeProduct(50), makeProduct(50)]);
     const users = await Promise.all(Array.from({ length: 8 }, () => makeUser()));
-    // Half add p1 first, half add p2 first: opposite "natural" order, same lock order in checkout.
-    await Promise.all(users.map(async (u, i) => {
-      const [first, second] = i % 2 ? [p1, p2] : [p2, p1];
-      await addToCart(u, first.id);
-      await addToCart(u, second.id);
-    }));
+    // Half add p1 first, half add p2 first: opposite "natural" order, same lock order in reserve().
+    await Promise.all(
+      users.map(async (u, i) => {
+        const [first, second] = i % 2 ? [p1, p2] : [p2, p1];
+        await addToCart(u, first.id);
+        await addToCart(u, second.id);
+      }),
+    );
     const results = await Promise.all(users.map((u) => checkout(u)));
     expect(results.every((r) => r.status === 201)).toBe(true);
-    expect(await stock(p1.id)).toMatchObject({ available: 42 });
+    expect((await stock(p1.id)).available).toBe(42);
   });
 
   it("a double-click on 'Place order' creates only one order", async () => {
@@ -159,10 +189,10 @@ describe("checkout: concurrency (the reason we use row locks)", () => {
     const results = await Promise.all([checkout(u), checkout(u)]);
     expect(results.map((r) => r.status).sort()).toEqual([201, 400]);
     expect(await prisma.order.count({ where: { userId: u.user.id } })).toBe(1);
-    expect(await stock(p.id)).toMatchObject({ available: 8, reserved: 0 });
+    await stockBecomes(p.id, { available: 8, reserved: 0 });
   });
 
-  it("if one line is short, nothing is reserved at all (atomic rollback)", async () => {
+  it("if one line is short, nothing is reserved at all, no order exists, and the cart is restored", async () => {
     const u = await makeUser();
     const plenty = await makeProduct(10);
     const scarce = await makeProduct(5);
@@ -171,7 +201,9 @@ describe("checkout: concurrency (the reason we use row locks)", () => {
     await prisma.inventory.update({ where: { productId: scarce.id }, data: { available: 1 } }); // someone else bought it
     const res = await checkout(u);
     expect(res.status).toBe(409);
+    expect(res.body.message).toContain("Only 1 left");
     expect(await stock(plenty.id)).toMatchObject({ available: 10, reserved: 0 });
     expect(await prisma.order.count({ where: { userId: u.user.id } })).toBe(0);
+    expect((await request(app).get("/cart").set(u.auth)).body.itemCount).toBe(7);
   });
 });

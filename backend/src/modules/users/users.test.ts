@@ -1,19 +1,26 @@
 import express from "express";
 import jwt from "jsonwebtoken";
 import request from "supertest";
-import { afterAll, describe, expect, it } from "vitest";
-import { createApp } from "../../app.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { env } from "../../config/env.js";
 import { prisma } from "../../config/prisma.js";
 import { authenticate, requireRole } from "../../middleware/auth.js";
 import { errorHandler } from "../../middleware/errorHandler.js";
+import { startCluster, type Cluster } from "../../test-cluster.js";
 
-const app = createApp();
+// M6: every request goes through the API gateway to the real services (see test-cluster.ts).
+let cluster: Cluster;
+let app: express.Express;
+beforeAll(async () => {
+  cluster = await startCluster();
+  app = cluster.gateway;
+});
 // Unique per run so tests never collide with real data or each other.
 const run = Date.now();
 const email = (n: string) => `test-${run}-${n}@example.com`;
 
 afterAll(async () => {
+  await cluster.close();
   await prisma.user.deleteMany({ where: { email: { startsWith: `test-${run}-` } } });
   await prisma.$disconnect();
 });

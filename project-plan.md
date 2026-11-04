@@ -1300,10 +1300,10 @@ Use these exact checkpoints.
 
 ## M6 — Microservices
 
-* [ ] API Gateway
-* [ ] Payment Service
-* [ ] Inventory Service
-* [ ] Notification Service
+* [x] API Gateway
+* [x] Payment Service
+* [x] Inventory Service
+* [x] Notification Service
 
 ## M7 — Reliability
 
