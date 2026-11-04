@@ -6,7 +6,11 @@ import { Order, Page, PaymentMethod } from '../models';
 import { CartService } from './cart.service';
 
 const isInProgress = (e: unknown) => e instanceof HttpErrorResponse && e.error?.error === 'request_in_progress';
-const isLostAnswer = (e: unknown) => e instanceof HttpErrorResponse && (e.status === 0 || e.status >= 500);
+// M6: 503 inventory_unavailable is a CLEAR answer, not a lost one: the server checked, could not
+// reserve stock, and cancelled the attempt (nothing was charged). Retrying it automatically
+// would just hit the same broken dependency - the user decides when to try again.
+const isClearFailure = (e: HttpErrorResponse) => e.error?.error === 'inventory_unavailable';
+const isLostAnswer = (e: unknown) => e instanceof HttpErrorResponse && (e.status === 0 || e.status >= 500) && !isClearFailure(e);
 
 /**
  * "We don't know whether the order exists": the answer got lost (status 0 / 5xx), or the first

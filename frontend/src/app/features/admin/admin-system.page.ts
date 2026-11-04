@@ -26,6 +26,7 @@ const REFRESH_MS = 3000;
         <p class="sc-muted mb-0">Cache and rate-limit health. Updates every {{ refreshSeconds }} seconds.</p>
       </div>
       <div class="d-flex flex-wrap gap-2">
+        <a routerLink="/admin/services" class="sc-btn sc-btn-soft"><app-icon name="layers" [size]="18" /> Services</a>
         <a routerLink="/admin/events" class="sc-btn sc-btn-soft"><app-icon name="activity" [size]="18" /> Events</a>
         <a routerLink="/admin/products" class="sc-btn sc-btn-soft"><app-icon name="grid" [size]="18" /> Manage products</a>
       </div>

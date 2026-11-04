@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { Express } from "express";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Prisma } from "../generated/prisma/client.js";
-import { createApp } from "./app.js";
 import { broker } from "./config/broker.js";
 import { kv } from "./config/kv.js";
 import { prisma } from "./config/prisma.js";
@@ -14,12 +14,16 @@ import { publisherStats } from "./events/order-events.js";
 import { startWorkers, stopWorkers } from "./events/workers.js";
 import { startKvServer, type RunningKvServer } from "./kv/server.js";
 import { startLogServer, type RunningLogServer } from "./log/server.js";
+import { settle, startCluster, type Cluster } from "./test-cluster.js";
 import { cleanup, makeProduct, makeUser } from "./test-utils.js";
 
 // M5 end-to-end: real checkout -> OrderCreated in a real ScaleLog broker -> the three real
 // consumer groups -> rows in PostgreSQL. Plus duplicates, chaos -> DLQ -> replay, broker down.
+// M6: the consumer groups now belong to different services, and the order's fate arrives as
+// OrderConfirmed / OrderCancelled after the asynchronous payment.
 
-const app = createApp();
+let cluster: Cluster;
+let app: Express;
 let logServer: RunningLogServer;
 let kvServer: RunningKvServer;
 let admin: Awaited<ReturnType<typeof makeUser>>;
@@ -47,6 +51,8 @@ beforeAll(async () => {
   broker.conn.connect(`kv://127.0.0.1:${logServer.port}`);
   await Promise.all([kv.waitUntilReady(), broker.conn.waitUntilReady()]);
   salesBefore = await sales();
+  cluster = await startCluster(); // services + gateway; this file manages ScaleKV / ScaleLog itself
+  app = cluster.gateway;
   startWorkers(undefined, { log: false });
   admin = await makeUser("ADMIN");
 });
@@ -56,6 +62,7 @@ afterAll(async () => {
   // (a failed close once left test users/products behind in the dev database).
   try {
     await stopWorkers();
+    await cluster.close();
     // Undo what the consumers wrote outside the test users/products (those cascade in cleanup()).
     if (broker.isReady) await collectEventIds();
     await prisma.processedEvent.deleteMany({ where: { eventId: { in: eventIds } } });
@@ -79,7 +86,7 @@ const lag = async (group: string) => {
   return d.groups.find((g) => g.group === group)?.partitions.reduce((s, p) => s + p.lag, 0) ?? -1;
 };
 
-describe("OrderCreated flows to all three consumer groups", () => {
+describe("an order's events flow through every consumer group", () => {
   it("a confirmed order -> customer notification, analytics projection, low-stock alert", async () => {
     const u = await makeUser();
     const p = await makeProduct(6, { priceCents: 2500 }); // buying 2 leaves 4 <= threshold 5
@@ -102,7 +109,8 @@ describe("OrderCreated flows to all three consumer groups", () => {
     const u = await makeUser();
     const p = await makeProduct(2);
     const cancelledBefore = (await sales())?.cancelledOrders ?? 0;
-    expect((await buy(u, p.id, 1, "TEST_CARD_DECLINE")).body.status).toBe("CANCELLED");
+    const res = await buy(u, p.id, 1, "TEST_CARD_DECLINE");
+    expect((await settle(app, u.auth, res.body.id)).status).toBe("CANCELLED");
     await expect.poll(async () => (await notifications(u)).items[0]?.title, { timeout: 10_000 }).toBe("Payment declined");
     await expect.poll(async () => (await sales())?.cancelledOrders ?? 0, { timeout: 10_000 }).toBe(cancelledBefore + 1);
     expect(await prisma.stockAlert.findUnique({ where: { productId: p.id } })).toBeNull();
@@ -118,15 +126,16 @@ describe("delivery guarantees", () => {
     await expect.poll(() => lag("analytics"), { timeout: 10_000 }).toBe(0);
     const revenue = (await sales())!.revenueCents;
 
-    // Find the exact record and append it AGAIN - like a redelivery after a crash before commit.
+    // Find the order's OrderConfirmed record and append it AGAIN - like a redelivery after a crash
+    // before commit (or the order service re-publishing it).
     let original: { key: string; value: string } | undefined;
     for (const part of [0, 1, 2]) {
       const { records } = await broker.fetch("orders", part, 0, 500);
-      original ??= records.find((r) => r.key === res.body.id);
+      original ??= records.find((r) => r.key === res.body.id && r.value.includes('"type":"OrderConfirmed"'));
     }
     await broker.produce("orders", original!.key, original!.value, { "x-test": "duplicate" });
 
-    for (const g of ["notification", "inventory", "analytics"]) await expect.poll(() => lag(g), { timeout: 10_000 }).toBe(0);
+    for (const g of ["payment", "notification", "inventory", "analytics"]) await expect.poll(() => lag(g), { timeout: 10_000 }).toBe(0);
     expect((await notifications(u)).items).toHaveLength(1); // still one
     expect((await sales())!.revenueCents).toBe(revenue); // not counted twice
   });
@@ -138,21 +147,24 @@ describe("delivery guarantees", () => {
     const revenueBefore = (await sales())?.revenueCents ?? 0;
     const res = await buy(u, p.id);
 
-    // notification fails 3x -> DLQ. analytics is a different group: unaffected.
-    const dlq = async () => (await request(app).get("/admin/events/dlq/notification").set(admin.auth)).body as { waiting: { orderId: string; error: string; attempts: number }[] };
-    await expect.poll(async () => (await dlq()).waiting.length, { timeout: 15_000 }).toBe(1);
-    expect((await dlq()).waiting[0]).toMatchObject({ orderId: res.body.id, attempts: 3 });
+    // notification fails 3x per event -> DLQ. Both of the order's events (OrderCreated, then
+    // OrderConfirmed) land there. analytics is a different group: unaffected.
+    const dlq = async () => (await request(app).get("/admin/events/dlq/notification").set(admin.auth)).body as { waiting: { orderId: string; type: string; error: string; attempts: number }[] };
+    await expect.poll(async () => (await dlq()).waiting.length, { timeout: 15_000 }).toBe(2);
+    expect((await dlq()).waiting.map((w) => w.type)).toEqual(["OrderCreated", "OrderConfirmed"]);
+    expect((await dlq()).waiting[1]).toMatchObject({ orderId: res.body.id, attempts: 3 });
     expect((await dlq()).waiting[0].error).toContain("chaos switch is ON");
     await expect.poll(async () => (await sales())?.revenueCents ?? 0, { timeout: 10_000 }).toBe(revenueBefore + 700);
     expect((await notifications(u)).items).toHaveLength(0);
 
     // Fix the "bug", replay the DLQ.
     await request(app).put("/admin/events/chaos/notification").set(admin.auth).send({ on: false }).expect(200);
-    expect((await request(app).post("/admin/events/dlq/notification/replay").set(admin.auth)).body.replayed).toBe(1);
+    expect((await request(app).post("/admin/events/dlq/notification/replay").set(admin.auth)).body.replayed).toBe(2);
     await expect.poll(async () => (await notifications(u)).items.length, { timeout: 10_000 }).toBe(1);
     expect((await dlq()).waiting).toHaveLength(0);
-    // Replay went through the main topic, so analytics saw the event again - and skipped it.
-    for (const g of ["notification", "inventory", "analytics"]) await expect.poll(() => lag(g), { timeout: 10_000 }).toBe(0);
+    // Replay went through the main topic, so EVERY group saw both events again - and each one
+    // recognised them: payment didn't charge twice, analytics didn't count twice.
+    for (const g of ["payment", "order", "notification", "inventory", "analytics"]) await expect.poll(() => lag(g), { timeout: 10_000 }).toBe(0);
     expect((await sales())!.revenueCents).toBe(revenueBefore + 700);
   }, 40_000);
 });
@@ -208,15 +220,16 @@ describe("admin view", () => {
     expect(res.body.broker.status).toBe("ready");
     expect(res.body.cluster.topics.find((t: { name: string }) => t.name === "orders").partitions).toHaveLength(3);
     const groups = res.body.cluster.groups.map((g: { group: string }) => g.group);
-    expect(groups).toEqual(expect.arrayContaining(["notification", "inventory", "analytics"]));
-    expect(res.body.localConsumers).toHaveLength(3);
+    expect(groups).toEqual(expect.arrayContaining(["payment", "order", "notification", "inventory", "analytics"]));
+    expect(res.body.localConsumers).toHaveLength(5); // in tests every group runs in this one process
+    expect(res.body.groups.find((g: { group: string }) => g.group === "payment")).toMatchObject({ topic: "orders", service: "payment" });
     await request(app).get("/admin/events").set((await makeUser()).auth).expect(403);
   });
 });
 
 // Keep LAST: stops the broker.
 describe("when the broker is down", () => {
-  it("checkout still succeeds; the unpublished event is counted (the dual-write gap M7 fixes)", async () => {
+  it("checkout still answers; the unpublished event is counted and the order waits in PENDING", async () => {
     await collectEventIds(); // for cleanup, while we still can
     await logServer.close();
     await expect.poll(() => broker.conn.status).toBe("down");
@@ -224,7 +237,8 @@ describe("when the broker is down", () => {
     const u = await makeUser();
     const res = await buy(u, (await makeProduct(5)).id);
     expect(res.status).toBe(201);
-    expect(res.body.status).toBe("CONFIRMED");
-    expect(publisherStats.notPublished).toBe(missedBefore + 1);
+    expect(res.body.status).toBe("PENDING"); // stock is reserved, but nobody will charge it...
+    await expect.poll(() => publisherStats.notPublished).toBe(missedBefore + 1);
+    // ...until the broker is back: then the order service's RECONCILER re-publishes it (m6 tests).
   });
 });

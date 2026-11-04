@@ -25,4 +25,12 @@ describe('checkout retry policy (safe because of the Idempotency-Key)', () => {
     expect(retryDelayMs(http(409, { error: 'insufficient_stock' }), 1)).toBeNull();
     expect(retryDelayMs(http(429), 1)).toBeNull();
   });
+
+  it('M6: "inventory unavailable" is a clear answer (nothing charged) - no automatic retry', () => {
+    const inventoryDown = http(503, { error: 'inventory_unavailable' });
+    expect(isUnknownOutcome(inventoryDown)).toBe(false);
+    expect(retryDelayMs(inventoryDown, 1)).toBeNull();
+    // A 502 from the gateway (order service down) is still unknown: keep the key, retry.
+    expect(isUnknownOutcome(http(502, { error: 'service_unavailable' }))).toBe(true);
+  });
 });
