@@ -1,0 +1,631 @@
+<!doctype html>
+<!--
+  SOURCE of docs/ScaleCart-Interview-Questions.pdf.
+  To regenerate the PDF: open this file in Edge or Chrome -> Print -> "Save as PDF", A4, margins default,
+  "Headers and footers" off (the page numbers are printed by the script used in development).
+  Keep the answers honest: describe what was BUILT, and say clearly what was not.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>ScaleCart · Interview Questions (Parts 1–6)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --ink: #111827; --muted: #4b5563; --soft: #6b7280; --line: #e5e7eb;
+    --brand: #4f46e5; --brand-50: #eef2ff; --brand-100: #e0e7ff;
+    --amber: #b45309; --amber-50: #fff7ed; --green: #047857; --green-50: #ecfdf5;
+    --code-bg: #f3f4f6;
+  }
+  @page { size: A4; margin: 18mm 17mm 20mm 17mm; }
+  * { box-sizing: border-box; }
+  html, body { background: #fff; }
+  body { font-family: Inter, "Segoe UI", Arial, sans-serif; color: var(--ink); font-size: 10.4pt; line-height: 1.55; margin: 0; }
+  code { font-family: "JetBrains Mono", Consolas, monospace; font-size: 0.86em; background: var(--code-bg); border-radius: 4px; padding: 0.05em 0.35em; white-space: nowrap; }
+  pre { font-family: "JetBrains Mono", Consolas, monospace; font-size: 8.4pt; line-height: 1.45; background: #f8fafc; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; white-space: pre; overflow: hidden; margin: 8px 0; }
+
+  /* cover */
+  .cover { page-break-after: always; }
+  .eyebrow { font-size: 8pt; font-weight: 700; letter-spacing: 0.32em; text-transform: uppercase; color: var(--brand); }
+  .cover h1 { font-size: 30pt; line-height: 1.1; margin: 10px 0 8px; font-weight: 800; letter-spacing: -0.02em; }
+  .cover .sub { font-size: 13pt; color: var(--muted); margin: 0 0 6px; }
+  .cover .meta { color: var(--soft); font-size: 9.5pt; margin: 2px 0; }
+  .toc { margin-top: 26px; border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; }
+  .toc h2 { margin: 0 0 10px; font-size: 12pt; }
+  .toc-row { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; border-top: 1px solid var(--line); }
+  .toc-row:first-of-type { border-top: 0; }
+  .toc-row b { font-weight: 600; }
+  .toc-row span:last-child { color: var(--brand); font-weight: 600; white-space: nowrap; }
+  .new { display: inline-block; font-size: 7.2pt; font-weight: 700; letter-spacing: 0.05em; color: var(--green); background: var(--green-50); border-radius: 999px; padding: 1px 7px; margin-left: 6px; vertical-align: 1px; }
+  .howto { margin-top: 18px; background: var(--brand-50); border-radius: 10px; padding: 12px 16px; color: #312e81; font-size: 9.6pt; }
+  .howto p { margin: 0 0 6px; } .howto p:last-child { margin: 0; }
+
+  /* parts */
+  .part { page-break-before: always; }
+  .part-head { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 2px solid var(--brand-100); }
+  .part-head h2 { font-size: 22pt; margin: 6px 0 2px; font-weight: 800; letter-spacing: -0.01em; }
+  .part-head p { margin: 0; color: var(--muted); }
+  .source { font-size: 8.6pt; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--soft); margin: 16px 0 6px; }
+  .note { background: var(--amber-50); border-left: 3px solid #f59e0b; border-radius: 6px; padding: 8px 12px; color: #78350f; font-size: 9.4pt; margin: 6px 0 12px; }
+  .m6 { background: var(--green-50); border-left: 3px solid #10b981; border-radius: 6px; padding: 6px 10px; color: #064e3b; font-size: 9.2pt; margin-top: 6px; }
+
+  /* questions */
+  .q { break-inside: avoid; margin: 0 0 13px; }
+  .q.long { break-inside: auto; }
+  .q h3 { display: flex; gap: 10px; align-items: flex-start; font-size: 11.2pt; line-height: 1.35; margin: 0 0 4px; font-weight: 700; break-after: avoid; }
+  .q h3 .n { flex: 0 0 auto; min-width: 26px; height: 22px; padding: 0 6px; border-radius: 6px; background: var(--brand); color: #fff; font-size: 9pt; display: inline-flex; align-items: center; justify-content: center; margin-top: 1px; }
+  .q p { margin: 0 0 5px; }
+  .q ul, .q ol { margin: 3px 0 6px; padding-left: 20px; }
+  .q li { margin: 1px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 9pt; margin: 6px 0; }
+  th, td { text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); padding: 4px 6px; }
+  th { background: #f9fafb; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<!-- ======================================================================= COVER -->
+<section class="cover">
+  <div class="eyebrow">ScaleCart · Distributed order processing platform</div>
+  <h1>Interview Questions &amp; Answers</h1>
+  <p class="sub">Parts 1–6 · 70 questions with full answers, based on what was actually built</p>
+  <p class="meta">Repository: github.com/MayurGaikwad57/Scale-Cart-Learning</p>
+  <p class="meta">Covers milestones M1–M6, all built and merged · November 2026</p>
+
+  <div class="toc">
+    <h2>Contents</h2>
+    <div class="toc-row"><span><b>Part 1</b> — M1 Foundation (architecture, database design)</span><span>Q1–Q8</span></div>
+    <div class="toc-row"><span><b>Part 2</b> — M2 Backend Core (auth, products, inventory, cart, orders, transactions)</span><span>Q9–Q18</span></div>
+    <div class="toc-row"><span><b>Part 3</b> — M3 Frontend Core (Angular 21)</span><span>Q19–Q27</span></div>
+    <div class="toc-row"><span><b>Part 4</b> — M4 Performance (own Redis “ScaleKV”, caching, rate limiting, idempotency)</span><span>Q28–Q39</span></div>
+    <div class="toc-row"><span><b>Part 5</b> — M5 Kafka (own Kafka “ScaleLog”, events, consumer groups)</span><span>Q40–Q51</span></div>
+    <div class="toc-row"><span><b>Part 6</b> — M6 Microservices (API gateway, payment, inventory, notification services)<span class="new">REWRITTEN · BUILT</span></span><span>Q52–Q70</span></div>
+  </div>
+
+  <div class="howto">
+    <p><b>How to use this document:</b> read the question, answer it out loud first, then compare with the written answer.</p>
+    <p>Parts 1–3 were written from what was built (the plan’s “challenge” step had been skipped for them); Parts 4–5 include the
+    question lists from <code>docs/06-performance.md</code> and <code>docs/07-events.md</code> word for word, plus the example
+    questions from <code>project-plan.md</code> §25.</p>
+    <p><b>New in this edition:</b> Part 6 is no longer a plan. It describes the microservices that were built in M6 (PR #4):
+    the 4 questions from <code>project-plan.md</code> §25, the 10 from <code>docs/08-microservices.md</code>, and 5 more on
+    what the code review and the tests taught. Green boxes in earlier parts point out where M6 changed an answer.</p>
+  </div>
+</section>
+
+<!-- ======================================================================= PART 1 -->
+<section class="part">
+  <div class="part-head">
+    <div class="eyebrow">Part 1 · Milestone M1</div>
+    <h2>Foundation</h2>
+    <p>Architecture and database design</p>
+  </div>
+
+  <div class="q"><h3><span class="n">1</span>What is ScaleCart, in one minute?</h3>
+    <p>An e-commerce order-processing platform I built to learn distributed systems step by step. It started as a modular monolith: one Node/Express + TypeScript backend with clear modules (users, products, inventory, cart, orders, payments) on PostgreSQL, plus an Angular 21 frontend. Each phase adds one production concern: caching and rate limiting (M4), event streaming (M5), then microservices, reliability patterns, scaling and observability. Under a no-install constraint, I built my own Redis-like store (ScaleKV) and my own Kafka-like broker (ScaleLog).</p>
+    <div class="m6">Since M6 it runs as an API gateway in front of four services (order, payment, inventory, notification) — see Part 6.</div>
+  </div>
+
+  <div class="q"><h3><span class="n">2</span>Why start with a modular monolith instead of microservices?</h3>
+    <p>Microservices add network failures, distributed transactions, deployment and debugging cost from day one. A monolith gives one database transaction for checkout, simple deployment and fast refactoring. Modular means each module has its own routes, service and repository, and modules talk through service functions rather than each other’s tables. So when a module needs to become a service later (payments in M6), the boundary already exists. You split when you have a reason, such as independent scaling, team ownership or failure isolation, not by default.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">3</span>Why store money as integer cents instead of a decimal/float?</h3>
+    <p>Floating point can’t represent values like 0.1 exactly: 0.1 + 0.2 ≠ 0.3, so totals drift. Integer cents (<code>price_cents INT</code>) make every sum exact, and formatting to ₹ happens only at display time. (DECIMAL in the database also works, but integers are simpler to move between DB, JSON and JavaScript without precision loss.)</p>
+  </div>
+
+  <div class="q"><h3><span class="n">4</span>Why UUIDs as primary keys instead of auto-increment integers?</h3>
+    <p>UUIDs can be generated anywhere (any service, any shard) without asking a central counter, so they survive moving data across services or shards later. They also don’t leak business volume: order #1042 tells a competitor how many orders you have. The cost is bigger indexes and random insert order (B-tree page splits). Time-ordered UUIDs (v7) reduce that.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">5</span>Which indexes did you create and why?</h3>
+    <p>Each index exists for a specific query:</p>
+    <ul>
+      <li><code>products (category, price_cents)</code> for the catalog filter by category plus price sort/range.</li>
+      <li><code>orders (user_id, created_at DESC)</code> for “my orders, newest first”, so the database reads the index in order instead of sorting.</li>
+      <li><code>UNIQUE cart_items (cart_id, product_id)</code>: one line per product per cart, and it doubles as the index for “items of a cart”.</li>
+      <li><code>UNIQUE users(email)</code>, <code>UNIQUE products(sku)</code> for lookups and duplicate prevention.</li>
+      <li><code>order_items(order_id)</code>, <code>payments(order_id)</code> for joining an order to its lines and payments.</li>
+    </ul>
+  </div>
+
+  <div class="q"><h3><span class="n">6</span>What constraints protect data integrity in the database itself?</h3>
+    <p>Rules the application could forget are enforced by PostgreSQL:</p>
+    <ul>
+      <li><code>CHECK (available &gt;= 0)</code> on inventory: stock can never go negative, even if the code has a bug.</li>
+      <li><code>CHECK (quantity &gt; 0)</code> on cart items.</li>
+      <li>Foreign keys between all tables.</li>
+      <li>Unique constraints on email, SKU, cart line, and <code>(user_id, idempotency_key)</code> on orders.</li>
+    </ul>
+    <p>The database is the last line of defence.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">7</span>Why is inventory a separate table from products?</h3>
+    <p>Products are read-heavy catalog data; inventory is write-heavy, contended data (every checkout locks and updates it). Separating them means a checkout’s row lock on stock doesn’t block reads or edits of product descriptions. It also prepares an independent Inventory service later. The table also has <code>reserved</code> (stock held during payment) and <code>version</code> (for optimistic locking).</p>
+    <div class="m6">That preparation paid off: in M6 the inventory table moved to its own Inventory Service unchanged.</div>
+  </div>
+
+  <div class="q"><h3><span class="n">8</span>What did you NOT finish in M1, honestly?</h3>
+    <p>The Docker setup (<code>docker-compose.yml</code>) was written but never tested, because Docker can’t be installed on the development machine. I run PostgreSQL as a local service instead. In an interview it’s better to say this than to pretend it was verified.</p>
+  </div>
+</section>
+
+<!-- ======================================================================= PART 2 -->
+<section class="part">
+  <div class="part-head">
+    <div class="eyebrow">Part 2 · Milestone M2</div>
+    <h2>Backend Core</h2>
+    <p>Auth, products, inventory, cart, orders, transactions</p>
+  </div>
+
+  <div class="q"><h3><span class="n">9</span>How does authentication work?</h3>
+    <p>On register, the password is hashed with bcrypt (slow, salted hashing, so a leaked database can’t be reversed quickly) and stored as <code>password_hash</code>. On login, bcrypt compares the hash and the server signs a JWT containing the user id (<code>sub</code>) and role, with an expiry. The client sends <code>Authorization: Bearer &lt;token&gt;</code> on every request, and the <code>authenticate</code> middleware verifies the signature and attaches <code>req.user</code>. <code>requireRole("ADMIN")</code> guards admin routes. JWTs are stateless (no session lookup), but you can’t revoke one before it expires without extra machinery (short expiry + refresh tokens, or a deny-list).</p>
+  </div>
+
+  <div class="q"><h3><span class="n">10</span>Walk me through checkout. Why is it one transaction?</h3>
+    <p>Inside one database transaction:</p>
+    <ol>
+      <li>Lock the user’s cart row (<code>SELECT … FOR UPDATE</code>).</li>
+      <li>Read the cart and reject an empty cart or inactive products.</li>
+      <li>Lock the stock rows (<code>FOR UPDATE … ORDER BY product_id</code>).</li>
+      <li>Check availability.</li>
+      <li>Move stock from <code>available</code> to <code>reserved</code>.</li>
+      <li>Create the order with a price snapshot per line.</li>
+      <li>Charge the (simulated) payment.</li>
+      <li>On success, confirm the order, turn the reservation into a sale and empty the cart. On decline, compensate: give the reserved stock back, mark the order CANCELLED, keep the cart.</li>
+    </ol>
+    <p>Any error rolls back everything. You can never end up with an order but no stock change, or stock taken but no order.</p>
+    <div class="m6">This was the M2–M5 design. In M6 the stock and the payment moved to other services, so one transaction is no longer possible — checkout became a sequence of local steps with compensations (Q57).</div>
+  </div>
+
+  <div class="q"><h3><span class="n">11</span>Two customers buy the last item at the same moment. What happens?</h3>
+    <p>Both transactions reach <code>SELECT … FROM inventory … FOR UPDATE</code>. PostgreSQL gives the row lock to one of them; the other waits. The first sees <code>available = 1</code>, reserves it and commits. Only then does the second get the lock, and it reads the current value 0 and fails with <code>insufficient_stock</code>. Without the lock, both could read 1 (a race condition) and oversell. The seeded “Limited Edition Smartwatch” with stock 1 exists to demonstrate this.</p>
+    <div class="m6">Still true in M6: the same lock now runs inside the Inventory Service’s <code>reserve()</code>, and the concurrency tests pass through the gateway.</div>
+  </div>
+
+  <div class="q"><h3><span class="n">12</span>Why <code>ORDER BY product_id</code> when locking stock rows?</h3>
+    <p>To prevent deadlocks. If cart A locks product 1 then 2, while cart B locks 2 then 1, each can hold one lock and wait forever for the other. If every transaction always locks rows in the same global order (sorted by id), a cycle of waiting is impossible.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">13</span>Pessimistic vs optimistic locking — which did you use and why?</h3>
+    <p>Pessimistic (<code>SELECT … FOR UPDATE</code>): lock first, then read and modify; others wait. Optimistic: read without locking, then update with <code>WHERE version = :readVersion</code>; if zero rows changed, someone else won, so retry. I used pessimistic for checkout because stock on a popular item is a high-contention row, where optimistic locking would cause many failed retries. Optimistic suits low contention (e.g. two admins rarely editing the same product). The <code>inventory.version</code> column is there for that comparison.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">14</span>Why snapshot the price on each order item?</h3>
+    <p>Prices change. If an order only referenced the product, raising the price tomorrow would rewrite last month’s order totals and invoices. <code>order_items.unit_price_cents</code> freezes what the customer actually paid. History must be immutable.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">15</span>Why soft-delete products instead of deleting rows?</h3>
+    <p>Order items reference products through foreign keys, and past orders must stay readable. A hard delete would either fail (FK violation) or cascade and destroy order history. <code>active = false</code> hides the product from customers (it returns 404 for them) while admins still see it, and old orders still show its name.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">16</span>Why does another user’s order return 404 instead of 403?</h3>
+    <p>403 Forbidden confirms the order exists, which leaks information (an attacker can enumerate valid order IDs). The query filters by <code>id AND user_id</code>, so someone else’s order is simply “not found”. This is a common defence against insecure direct object references (IDOR).</p>
+  </div>
+
+  <div class="q"><h3><span class="n">17</span>How do you validate input and handle errors consistently?</h3>
+    <p>Every request body is validated with zod schemas in a <code>validateBody</code> middleware. Invalid input becomes <code>400 validation_failed</code> with per-field details. Expected failures throw an <code>HttpError(status, code, message)</code>. A single error-handler middleware turns everything into the same JSON shape (<code>{ error, message?, details? }</code>), and unexpected errors are logged but returned as <code>500 internal_error</code> without leaking internals. Config is also validated at boot (<code>env.ts</code>), so the app fails fast with a clear message.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">18</span>How did you test the concurrency logic?</h3>
+    <p>Integration tests run against the real PostgreSQL through the HTTP API (supertest). They include concurrent checkouts racing for the last unit, and assert that exactly one wins and stock never goes negative. Each test run tags its data with a unique prefix and cleans up only what it created. I also mutation-checked the tests: deliberately removing the lock or the check makes a test fail. That proves the tests actually detect the bug.</p>
+  </div>
+</section>
+
+<!-- ======================================================================= PART 3 -->
+<section class="part">
+  <div class="part-head">
+    <div class="eyebrow">Part 3 · Milestone M3</div>
+    <h2>Frontend Core</h2>
+    <p>Angular 21: standalone, zoneless, signals</p>
+  </div>
+
+  <div class="q"><h3><span class="n">19</span>What is “modern Angular” in this project?</h3>
+    <ul>
+      <li>Standalone components: no NgModules.</li>
+      <li>Zoneless change detection: no zone.js; Angular updates the view when signals change.</li>
+      <li>Signals for state.</li>
+      <li>New control flow (<code>@if</code>, <code>@for</code>, <code>@let</code>).</li>
+      <li>Lazy-loaded routes with <code>loadComponent</code>, so every page’s code downloads only on first visit.</li>
+      <li>OnPush on every component.</li>
+      <li>Route params bound as component inputs (<code>withComponentInputBinding</code>).</li>
+    </ul>
+  </div>
+
+  <div class="q"><h3><span class="n">20</span>Signals vs RxJS — how did you decide which to use where?</h3>
+    <p>Signals are for state: synchronous values the UI reads (logged-in user, cart, notifications), with <code>computed()</code> for derived values (cart count and total can never disagree with the items). RxJS is for async streams over time: HTTP calls, debouncing the search box (<code>debounceTime</code>), cancelling stale requests (<code>switchMap</code>), polling with <code>timer</code>. The two meet through <code>toSignal()</code>. The rule from the plan: don’t use signals just because they’re new; pick per piece of state.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">21</span>Where does each piece of state live?</h3>
+    <ul>
+      <li>Logged-in user and cart: signals in root services, because the navbar, product pages, cart and checkout all need them at once.</li>
+      <li>Reloading the cart on login/logout: an <code>effect()</code>.</li>
+      <li>Form inputs: Reactive Forms (validation, touched/dirty).</li>
+      <li>Loading/error flags, menus: local component signals.</li>
+      <li>Session across reloads: localStorage + <code>/auth/me</code> at startup.</li>
+    </ul>
+  </div>
+
+  <div class="q"><h3><span class="n">22</span>How does the HTTP interceptor work?</h3>
+    <p>On every request to our API (and only our API, never third parties) it adds <code>Authorization: Bearer &lt;token&gt;</code>. If the API answers 401 on a protected call, the session is dead, so it logs out and redirects to <code>/login?returnUrl=…</code>. The login and register calls themselves are excluded, because a 401 there means “wrong password”, not “expired session”.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">23</span>Are route guards security?</h3>
+    <p>No. <code>authGuard</code>, <code>adminGuard</code> and <code>guestGuard</code> are UX only: they stop people from seeing pages they can’t use. Anyone can call the API directly, so the API enforces authorization (<code>authenticate</code>, <code>requireRole</code>). Never trust the client.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">24</span>What is an open redirect, and how did you prevent it?</h3>
+    <p>After login we send the user back to <code>returnUrl</code>. If an attacker crafts <code>…/login?returnUrl=https://evil.com</code>, a naive app would forward a freshly logged-in user to a phishing site. <code>safeReturnUrl()</code> only allows in-app paths starting with a single <code>/</code>, and rejects absolute URLs and protocol-relative <code>//evil.com</code>. It’s unit-tested.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">25</span>Storing the JWT in localStorage — what’s the trade-off?</h3>
+    <p>It’s simple and survives reloads, but any JavaScript running on the page can read it, so an XSS bug could steal the token. The hardened alternative is an httpOnly, Secure, SameSite cookie (JavaScript can’t read it), which then needs CSRF protection. For a learning project I chose simplicity and documented the trade-off.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">26</span>How does the product search avoid flooding the API while the user types?</h3>
+    <p>Search, filter and page live in signals. A <code>computed()</code> builds the query, and RxJS adds <code>debounceTime</code> (wait until typing pauses) and <code>switchMap</code> (cancel the previous in-flight request when a new query starts, so an old slow response can’t overwrite a newer one). The result is exposed via <code>toSignal</code>.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">27</span>How did you verify the UI really works?</h3>
+    <p>Unit tests for services and helpers (vitest), plus browser journeys driven in real Edge (headless, via puppeteer-core): login, add to cart, search, checkout declined and successful, order history, logout guard, admin product creation. I took screenshots of every page at desktop width and at 390px phone width. Testing on a phone width caught a real bug later (a notification dropdown cut off on the left that a “no horizontal scroll” check couldn’t see).</p>
+  </div>
+</section>
+
+<!-- ======================================================================= PART 4 -->
+<section class="part">
+  <div class="part-head">
+    <div class="eyebrow">Part 4 · Milestone M4</div>
+    <h2>Performance</h2>
+    <p>Own Redis “ScaleKV”, caching, rate limiting, idempotency</p>
+  </div>
+  <div class="source">From docs/06-performance.md</div>
+
+  <div class="q"><h3><span class="n">28</span>Why must a cache or rate limiter be a separate process when you run several API instances?</h3>
+    <p>In production several copies of the API run behind a load balancer. A <code>Map</code> inside one process is invisible to the others:</p>
+    <ul>
+      <li>Cache: each instance has its own copy, and an invalidation reaches only the instance that handled the write, so the others keep serving stale data.</li>
+      <li>Rate limiter: each instance counts separately, so a client spread over N instances gets N× the limit.</li>
+    </ul>
+    <p>Shared state has to live outside the app processes, which is exactly why Redis exists. That’s why ScaleKV is its own process that every API instance talks to over TCP.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">29</span>Redis is single-threaded. Why is that fast, and why does it make <code>INCR</code> safe?</h3>
+    <p>Each command is tiny in-memory work (microseconds), so the bottleneck is the network, not the CPU. A single thread means no locks, no lock contention and no context switches. And because commands run one at a time to completion, <code>INCR</code> (read, add 1, write) can never interleave with another client’s <code>INCR</code>. That makes it atomic for free. ScaleKV works the same way: Node runs JavaScript on one thread and <code>execute()</code> never awaits mid-command.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">30</span>Walk through cache-aside. Why delete after the DB commit and not before? What race remains?</h3>
+    <p><b>Read:</b> look in the cache. On a HIT, return it. On a MISS, read PostgreSQL, store the result with a TTL, return it. <b>Write:</b> update PostgreSQL first, then invalidate.</p>
+    <p>If you invalidate before the commit, a reader can slip in between, read the old row (not yet committed) and cache it again, and the stale value lives for the full TTL. A race remains even with delete-after-commit: a reader misses and reads the old row; the writer commits and deletes; then the slow reader stores the old row. My fix (found in code review) is versioned keys. Every product has a version counter (<code>product:ver:&lt;id&gt;</code>), the cache key includes it (<code>product:&lt;id&gt;:v&lt;n&gt;</code>), and a write bumps the counter. The slow reader’s late write lands on an old version that nobody reads anymore. TTL bounds any remaining staleness.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">31</span>Explain stampede vs avalanche vs penetration and one fix for each.</h3>
+    <ul>
+      <li><b>Stampede</b> (thundering herd): a hot key expires and hundreds of requests miss at once and all hit the database. Fix: single-flight: concurrent misses for the same key share one database query (across instances: a short <code>SET lock NX PX</code> mutex, or refresh before expiry).</li>
+      <li><b>Avalanche:</b> many keys created together expire together, and the database gets the whole load at once. Fix: TTL jitter (±10% random), so expiries spread out.</li>
+      <li><b>Penetration:</b> requests for IDs that don’t exist always miss and always hit the database (often an attack). Fix: negative caching: cache “not found” briefly (15s), plus validating the UUID format before any lookup (at scale: a Bloom filter).</li>
+    </ul>
+  </div>
+
+  <div class="q"><h3><span class="n">32</span>Fixed window vs sliding window counter vs token bucket: which would you pick for login, and for a public API?</h3>
+    <ul>
+      <li><b>Fixed window:</b> one counter per minute. Cheap, but allows a 2× burst at the boundary (100 requests at 12:00:59 and 100 more at 12:01:00).</li>
+      <li><b>Sliding window log:</b> a timestamp per request. Exact, but memory grows with the limit.</li>
+      <li><b>Sliding window counter</b> (what I built): <code>estimate = previous × (1 − elapsed fraction) + current</code>. Two small counters, no boundary burst, only needs <code>INCR</code>/<code>GET</code>.</li>
+      <li><b>Token bucket:</b> a refill rate plus a capacity. Allows controlled bursts and needs an atomic read-modify-write (a Lua script in Redis).</li>
+    </ul>
+    <p>For login, use a strict per-IP/per-account sliding window with no bursts (brute force is the threat), and possibly fail closed at a bank. For a public API, a token bucket lets well-behaved clients burst a little while capping the average. Mine fails open: if ScaleKV is down, requests are allowed, because a cache outage shouldn’t become a full site outage.</p>
+    <div class="m6">M6 twist: behind a gateway, the per-IP limit depends on the services seeing the real client IP — and a code-review bug showed how a faked <code>X-Forwarded-For</code> could defeat it (Q69).</div>
+  </div>
+
+  <div class="q long"><h3><span class="n">33</span>A client retries <code>POST /orders</code> after a timeout. How do you guarantee one order? What if Redis lost the key?</h3>
+    <p>The client sends an <code>Idempotency-Key</code> (one per purchase attempt). There are two layers:</p>
+    <ol>
+      <li><b>ScaleKV (fast layer):</b> <code>SET idem:order:&lt;user&gt;:&lt;key&gt; {running, fingerprint} NX PX 60s</code>.
+        <ul>
+          <li>Another request is still running with that key: <code>409 request_in_progress</code>.</li>
+          <li>The first request finished: replay the stored response with <code>Idempotent-Replayed: true</code>.</li>
+          <li>Same key with a different body (SHA-256 fingerprint): <code>422 idempotency_key_reused</code>.</li>
+          <li>The handler failed: delete the record so the key can be retried.</li>
+        </ul>
+      </li>
+      <li><b>PostgreSQL (the guarantee):</b> <code>UNIQUE (user_id, idempotency_key)</code> on orders plus the stored fingerprint.</li>
+    </ol>
+    <p>If ScaleKV lost the key (restart, eviction, outage), the database still protects you. Inside the checkout transaction, after locking the user’s cart row, we look for an order with that key (“lock, then check”, so no race), and the unique constraint is the final backstop. The frontend keeps the same key on unknown outcomes (network error, 5xx, 409 in progress) and retries automatically, which is safe only because of the key.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">34</span>Your client library times out a command but the reply arrives later. What can go wrong?</h3>
+    <p>On a pipelined connection, replies are matched to commands purely by order (FIFO). If the timed-out command’s slot is removed from the queue, its late reply gets handed to the next command. That command returns someone else’s data, which is a silent, nasty bug. The fix: keep the slot but mark it settled, and drop its late reply when it arrives. A test reproduces head-of-line blocking to prove it. Separately, a circuit breaker treats 3 timeouts in a row as “server frozen”: it drops the connection, fails fast and reconnects with backoff.</p>
+  </div>
+
+  <div class="source">From project-plan.md §25, “After Redis”</div>
+
+  <div class="q"><h3><span class="n">35</span>Why Redis?</h3>
+    <p>For shared, fast, in-memory state across all API instances: a cache in front of PostgreSQL (fewer and faster reads), rate-limit counters, and idempotency records. It gives atomic operations (<code>INCR</code>, <code>SET NX</code>), TTLs, and eviction when memory is full. In ScaleCart I couldn’t install Redis, so I built ScaleKV, which speaks Redis’s real RESP protocol. Switching to real Redis would only mean changing <code>KV_URL</code>.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">36</span>Why Cache Aside?</h3>
+    <p>The application controls caching explicitly. Only data that’s actually requested gets cached (lazy loading), the cache can be down without breaking anything (we just read the database: <code>X-Cache: BYPASS</code>), and invalidation stays in our code next to the writes. Alternatives: write-through (write to cache and DB together; always warm, but caches data nobody reads), write-behind (write to cache, flush to DB later; fast, but risks data loss), read-through (the cache loads from the DB itself; needs cache-side loaders).</p>
+  </div>
+
+  <div class="q"><h3><span class="n">37</span>What happens when Redis goes down?</h3>
+    <p>In ScaleCart the app degrades instead of failing:</p>
+    <ul>
+      <li>Commands fail fast (no waiting for timeouts).</li>
+      <li>Product reads go straight to PostgreSQL (<code>BYPASS</code>, slower but correct).</li>
+      <li>Rate limits fail open.</li>
+      <li>Idempotency falls back to the database layer.</li>
+      <li>The client reconnects in the background with exponential backoff (100ms → 5s), and the admin System page shows “Down”.</li>
+    </ul>
+    <p>I demonstrated this live by killing ScaleKV mid-use: the shop kept working and reconnected by itself when ScaleKV came back.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">38</span>What happens during cache stampede?</h3>
+    <p>A popular key expires, every concurrent request misses at the same moment, and they all query the database together. Database load spikes, latency rises, and timeouts can cascade. Mitigations: single-flight (I implemented it per process), a distributed lock so only one instance recomputes, early/probabilistic refresh before the TTL ends, and TTL jitter so keys don’t all expire at once.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">39</span>How would you invalidate the cache?</h3>
+    <ul>
+      <li><b>Single items:</b> after the database commit, invalidate the product’s key. I bump a per-product version counter (versioned keys) so a late stale write is unreachable.</li>
+      <li><b>Many keys at once</b> (all catalog list pages, one per filter/sort/page combination): never <code>KEYS products:*</code> (O(N), and it blocks Redis’s single thread). Instead <code>INCR products:ver</code>; every list key includes the version, so all old pages become unreachable at once and expire via their TTL.</li>
+      <li>Checkout refreshes only the sold products’ pages, so the list cache keeps its hit rate under steady orders (trade-off: list-page stock may lag up to 30s, while the product page and checkout are always exact).</li>
+      <li>At scale: CDC-driven invalidation (M8).</li>
+    </ul>
+    <div class="m6">In M6 the Inventory Service invalidates a product’s page whenever <code>available</code> changes: on reserve and on release (not on commit, which only moves units from reserved to sold).</div>
+  </div>
+</section>
+
+<!-- ======================================================================= PART 5 -->
+<section class="part">
+  <div class="part-head">
+    <div class="eyebrow">Part 5 · Milestone M5</div>
+    <h2>Kafka</h2>
+    <p>Own Kafka “ScaleLog”, events, consumer groups</p>
+  </div>
+  <div class="source">From docs/07-events.md</div>
+
+  <div class="q"><h3><span class="n">40</span>Kafka vs a queue (RabbitMQ/SQS): what changes when consuming doesn’t delete?</h3>
+    <p>In a queue, a consumed and acknowledged message is removed, and one message goes to one consumer. In Kafka the topic is an append-only log: reading doesn’t delete, and each consumer group keeps its own position (offset). So:</p>
+    <ul>
+      <li>Many independent groups can each read every event (notification, inventory and analytics all see every <code>OrderCreated</code>).</li>
+      <li>You can replay history by moving an offset.</li>
+      <li>A new consumer can be added later and process old events.</li>
+      <li>Progress is a single number per partition instead of per-message acks.</li>
+      <li>Retention is time- or size-based, not consumption-based.</li>
+    </ul>
+    <div class="m6">M6 used exactly this: the new <code>payment</code> group was added to the existing <code>orders</code> topic without changing any producer.</div>
+  </div>
+
+  <div class="q"><h3><span class="n">41</span>How does Kafka keep events of one order in order, and what does that cost?</h3>
+    <p>Order is only guaranteed within a partition. The producer uses a key (the order ID), and <code>hash(key) % partitions</code> sends all events of that order to the same partition. One partition is processed by one group member, sequentially, so per-key order holds. The costs:</p>
+    <ul>
+      <li>There’s no global order across partitions.</li>
+      <li>A group’s parallelism is capped by the partition count (4 members on 3 partitions means one is idle).</li>
+      <li>A hot key overloads its partition.</li>
+      <li>Changing the partition count remaps keys, which breaks ordering during the change.</li>
+    </ul>
+  </div>
+
+  <div class="q"><h3><span class="n">42</span>A consumer crashes after writing to the DB but before committing. What happens, and how do you make it safe?</h3>
+    <p>The offset wasn’t committed, so after the rebalance the event is delivered again (to the restarted consumer or another member). That’s at-least-once delivery: commit after handling. (Committing before handling would be at-most-once, where a crash loses the event.) To make it safe, consumers must be idempotent. In ScaleCart, each handler runs inside <code>once(group, eventId, …)</code>, which inserts <code>(consumer_group, event_id)</code> into <code>processed_events</code> in the same database transaction as the side effect. Either both commit or both roll back, and a redelivery hits the primary key and is skipped. That turns at-least-once delivery into exactly-once effect. A tested subtlety from code review: only a conflict on that marker means “duplicate”; any other error must be retried, or the event is silently lost.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">43</span>Explain a rebalance. What is a zombie consumer and how is it stopped?</h3>
+    <p>Group members send heartbeats (every 1s in ScaleLog). When a member joins, leaves (graceful LEAVE) or misses heartbeats for the session timeout (10s), the broker reassigns the partitions (range assignment) and bumps the group’s generation number. Measured live: after a hard kill, the API took over in 10.3s. A zombie is a member that was declared dead (e.g. it froze for a GC pause or a network blip) but is still running and tries to commit for a partition that now belongs to someone else. Fencing stops it: every commit carries the member’s generation, and the broker rejects a stale generation (<code>ILLEGAL_GENERATION</code>) or a partition the member doesn’t own (<code>NOT_ASSIGNED</code>). The zombie then re-reads its assignment, and its uncommitted event is redone by the new owner (a duplicate, which idempotency absorbs).</p>
+  </div>
+
+  <div class="q"><h3><span class="n">44</span>One event always fails. What happens without a DLQ, and what does a DLQ cost you?</h3>
+    <p>Without a DLQ, the consumer retries that poison message forever. Since a partition is processed in order, everything behind it is stuck: head-of-line blocking. Lag grows and customers stop getting notifications. With a DLQ, after N retries with exponential backoff (ScaleLog: 3 attempts, 200ms/400ms) the record is copied to <code>orders.&lt;group&gt;.dlq</code> with the error, the attempt count and its original location; the offset is committed and the partition keeps flowing. If even the DLQ write fails, we don’t commit, so nothing is lost. The cost is ordering: while an event waits in the DLQ, later events for the same order can overtake it, so a replay can apply things out of order. There’s also operational work: someone must inspect and replay (I built an admin Replay button, plus a “chaos switch” to demonstrate it).</p>
+  </div>
+
+  <div class="q"><h3><span class="n">45</span>Your order is saved but the event wasn’t published. Why can this happen and how do you fix it?</h3>
+    <p>It’s the dual-write problem. Checkout writes the order to PostgreSQL and then sends the event to the broker: two systems with no shared transaction. If the broker is down, or the process dies between the two writes, the order exists but its event never does, so there’s no notification and no analytics. ScaleCart doesn’t fail the checkout for this; it counts missed events and shows a warning on the admin Events page. The fixes:</p>
+    <ul>
+      <li><b>Transactional outbox (M7):</b> write the event into an outbox table in the same transaction as the order; a relay process publishes from the outbox and marks rows as sent (at-least-once again, so consumers stay idempotent).</li>
+      <li><b>CDC (M8):</b> stream the database’s own change log (WAL) into the broker.</li>
+    </ul>
+    <div class="m6">In M6 a lost event matters more (payment now depends on it), so I added a reconciler and an inventory sweeper as safety nets until the outbox arrives (Q62).</div>
+  </div>
+
+  <div class="q"><h3><span class="n">46</span>What does “consumer lag” tell you and when do you alert on it?</h3>
+    <p>Lag = log end offset − committed offset, per partition: events written but not yet processed by that group. Some lag that stays steady is normal. Lag that keeps growing means consumers can’t keep up (too slow, crashing, stuck on a poison message, or too few partitions/members). Alert on sustained growth or on lag measured in time (e.g. “notifications more than 2 minutes behind”), not on a single spike. The admin Events page shows lag per group and partition.</p>
+  </div>
+
+  <div class="source">From project-plan.md §25, “After Kafka”</div>
+
+  <div class="q"><h3><span class="n">47</span>What happens when a consumer crashes?</h3>
+    <p>Its heartbeats stop. After the session timeout (10s) the broker removes it, rebalances, and gives its partitions to the remaining members (new generation). They resume from the last committed offset, so any event the crashed consumer handled but didn’t commit is processed again. Nothing is lost (at-least-once), and duplicates are absorbed by idempotent handlers. A graceful stop (Ctrl+C) sends LEAVE, so the rebalance is immediate instead of waiting 10s.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">48</span>What happens before offset commit?</h3>
+    <p>The consumer fetches records from its position, runs the handler for one record (with retries; on final failure it writes the record to the DLQ), and only then commits <code>offset + 1</code>. Until that commit succeeds, the broker still considers the record unprocessed. If the consumer dies at any point before the commit, the record is redelivered. If the commit is rejected (fenced after a rebalance), the consumer drops its position and refreshes its assignment.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">49</span>How do you handle duplicates?</h3>
+    <p>Assume they will happen: redelivery after a crash or rebalance, producer retries, and DLQ replays all cause them. Every event carries a unique <code>eventId</code>. Each consumer group records processed IDs in <code>processed_events</code>, in the same transaction as its work, so the second delivery is a no-op. Some effects are naturally idempotent (an upsert setting a value); others are not (<code>revenue += total</code>), and those must be guarded. I tested it by re-appending an already-processed event: still one notification, and revenue counted once.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">50</span>What causes rebalancing?</h3>
+    <ul>
+      <li>A member joins (a new worker starts; <code>npm run worker</code> triggers it).</li>
+      <li>A member leaves gracefully (shutdown sends LEAVE).</li>
+      <li>A member misses heartbeats past the session timeout (crash, freeze, long GC pause, network partition).</li>
+      <li>In real Kafka also: a change in the topic’s partitions, or consumers exceeding <code>max.poll.interval</code> (taking too long between polls).</li>
+    </ul>
+    <p>Rebalances pause progress briefly and can cause duplicates, so you avoid unnecessary ones (stable membership, sensible timeouts, cooperative rebalancing in real Kafka).</p>
+  </div>
+
+  <div class="q"><h3><span class="n">51</span>How do partitions affect scaling?</h3>
+    <p>A partition is the unit of parallelism: within one group, each partition is consumed by exactly one member. So the maximum useful consumers in a group = the number of partitions (3 partitions means at most 3 busy members; a 4th sits idle, as a test shows). More partitions mean more parallelism and throughput, but also more files, more open handles, longer rebalances, and ordering only per key. Increasing partitions later changes key-to-partition mapping, so choose the count with growth in mind.</p>
+  </div>
+</section>
+
+<!-- ======================================================================= PART 6 -->
+<section class="part">
+  <div class="part-head">
+    <div class="eyebrow">Part 6 · Milestone M6</div>
+    <h2>Microservices</h2>
+    <p>API gateway + payment, inventory and notification services — built and merged (PR #4)</p>
+  </div>
+
+  <div class="q long"><h3><span class="n">→</span>The architecture in one picture (say this first)</h3>
+<pre>Angular :4300 ─► API Gateway :3000 ─┬─► Order :3001         users, catalog, cart, orders
+                (own reverse proxy) ├─► Payment :3002       payments (from events)
+                                    ├─► Inventory :3003     stock + reservations
+                                    └─► Notification :3004  the customer's bell
+
+Events through ScaleLog:
+  orders topic    OrderCreated, OrderConfirmed, OrderCancelled
+  payments topic  PaymentSucceeded, PaymentFailed</pre>
+    <p>Each service is its own Node process with its own port and its own consumer groups. The browser still talks to one address. Under the no-install constraint there is no Docker/Kubernetes/nginx: the gateway is ~80 lines of my own reverse proxy, and <code>npm run dev</code> starts all seven processes (ScaleKV, ScaleLog, four services, gateway).</p>
+  </div>
+
+  <div class="source">From project-plan.md §25, “After microservices”</div>
+
+  <div class="q"><h3><span class="n">52</span>Why did you extract Payment?</h3>
+    <p>Payment has the most independent failure characteristics: it talks to an external provider that is slow (I simulate 1.2 s), sometimes down, rate-limited, and has its own retry/timeout/idempotency rules and compliance scope (card data, PCI). In the monolith, a slow provider kept the whole checkout transaction — and its row locks on the cart and the stock — open while we waited. As its own service, consuming <code>OrderCreated</code> from the log, a provider outage no longer blocks checkout: orders simply wait in PENDING and are charged when it recovers. The boundary was already clean (<code>paymentsService.charge</code>), so extraction was cheap. Inventory came next because stock is the most contended data, and Notification because it is a pure reaction to events.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">53</span>Why not extract everything?</h3>
+    <p>Every extraction adds network calls that can fail or time out, duplicated data, compensations instead of one SQL transaction, more processes to run and debug, and versioned contracts between teams. Users, catalog and cart had no driver to move (no different scaling, ownership or failure profile), so they stayed in the Order Service — the remaining monolith. That is the strangler-fig approach (Q64): extract when there is a reason. Splitting everything at once creates a “distributed monolith”: services that must change and deploy together, with all of the costs and none of the benefits.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">54</span>How do services communicate?</h3>
+    <p>Two styles, chosen per interaction:</p>
+    <ul>
+      <li><b>Synchronous HTTP</b> when the caller needs the answer now: the Order Service calls the Inventory Service’s <code>POST /internal/reservations</code> during checkout, because the customer must hear “out of stock” immediately. Always with a timeout (3 s) and a service token (<code>X-Internal-Token</code>).</li>
+      <li><b>Asynchronous events</b> through ScaleLog when a service only announces a fact: <code>OrderCreated</code> → Payment; <code>PaymentSucceeded/Failed</code> → Order; <code>OrderConfirmed/Cancelled</code> → Inventory, Notification, Analytics. Loose coupling: the producer doesn’t know who listens, and consumers can be down.</li>
+      <li><b>Browser → gateway → service</b> over HTTP. <code>/internal/*</code> routes are never forwarded by the gateway.</li>
+    </ul>
+    <p>Rule of thumb: synchronous for questions, events for facts. Every synchronous call is a coupling in availability, so I kept exactly one in the checkout path.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">55</span>What happens when one service is unavailable?</h3>
+    <p>Built and tested for each one:</p>
+    <table>
+      <tr><th>Service down</th><th>What the customer sees</th><th>Why</th></tr>
+      <tr><td>Payment</td><td>Checkout still works; the order stays “processing payment”, then completes when it’s back.</td><td>Async: <code>OrderCreated</code> waits in the log.</td></tr>
+      <tr><td>Inventory</td><td>“Try again in a moment”, nothing charged, cart kept. Product pages still load.</td><td>Sync call refused → we know nothing was reserved → undo.</td></tr>
+      <tr><td>Notification</td><td>Only the bell fails (502 for <code>/notifications</code>); checkout unaffected; messages arrive later.</td><td>Async consumer; gateway isolates its routes.</td></tr>
+      <tr><td>Order</td><td>Most of the site is down (it is still the core).</td><td>The honest weak spot; it would be the next to split / replicate.</td></tr>
+    </table>
+    <p>The gateway turns a dead service into a quick <code>502</code> and a slow one into <code>504</code> instead of hanging, and <code>/health/ready</code> reports “degraded” with which service is down. The goal: one failing service degrades one feature, not the shop. Next (M7): retries with backoff and a circuit breaker on the reserve call.</p>
+  </div>
+
+  <div class="source">From docs/08-microservices.md</div>
+
+  <div class="q"><h3><span class="n">56</span>Why is payment asynchronous but stock reservation synchronous?</h3>
+    <p>They have opposite profiles. <b>Reservation</b> is fast, internal and contended, and its answer changes what the customer does next (“only 1 left”); doing it asynchronously would mean accepting orders and cancelling them later with an apology e-mail — acceptable at Amazon scale, poor UX here. <b>Payment</b> is slow, external and flaky, and the customer can wait a second for it: checkout answers <code>201 PENDING</code> in ~150 ms and the order page polls until CONFIRMED or CANCELLED (“processing your payment…”). Stock is reserved first, so it can’t be sold twice while the payment is in flight.</p>
+  </div>
+
+  <div class="q long"><h3><span class="n">57</span>Walk me through the checkout now that it spans three services.</h3>
+    <ol>
+      <li><b>Order service, one local transaction:</b> lock the cart, idempotency check, create the order <code>PENDING</code> with price snapshots, and move the cart into the order (a double-click’s second request then sees an empty cart).</li>
+      <li><b>Inventory, synchronous (3 s timeout):</b> reserve every line or nothing, using the same <code>FOR UPDATE ORDER BY product_id</code> locking as M2.
+        <ul>
+          <li><code>409</code> out of stock → undo step 1 (order deleted, cart restored) → answer 409 with the product name.</li>
+          <li>Not running (connection refused) → undo step 1 → <code>503</code>: we <i>know</i> nothing was reserved.</li>
+          <li>Timeout / 5xx → outcome unknown → cancel + release (Q58) → 503.</li>
+        </ul>
+      </li>
+      <li>Publish <code>OrderCreated</code> v2 (PENDING, carries the payment method) and answer <code>201 PENDING</code>.</li>
+      <li><b>Payment</b> charges once → <code>PaymentSucceeded</code> / <code>PaymentFailed</code>.</li>
+      <li><b>Order</b> sets CONFIRMED or CANCELLED (cart restored) → <code>OrderConfirmed</code> / <code>OrderCancelled</code>.</li>
+      <li><b>Inventory</b> sells or releases the reservation; <b>Notification</b> writes the bell message; <b>Analytics</b> updates the daily sales.</li>
+    </ol>
+    <p>No transaction spans these steps. Each step is atomic on its own, and failures are repaired by explicit compensations (delete the order, restore the cart, release the stock). That is the idea of a <b>saga</b>, which M7 formalises.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">58</span>A call to the inventory service times out. Did it reserve the stock? What do you do?</h3>
+    <p>You can’t know: the request may never have arrived, may have succeeded with the answer lost, or may <i>still be running</i>. That third outcome is what makes distributed systems hard. So the HTTP client distinguishes “unreachable” (definitely not processed) from “timeout/5xx” (unknown). On unknown, the order service cancels the order, restores the cart, frees the idempotency key, sends a direct <code>release</code> and publishes <code>OrderCancelled</code> (handled even if inventory is down right now). The dangerous race: the slow reserve arrives <i>after</i> the release and reserves stock for a dead order. The fix is a <b>tombstone</b>: release of an order inventory has never seen writes a <code>RELEASED</code> row, and a later reserve for it gets <code>409 reservation_released</code>. A test reproduces exactly this with a deliberately slow proxy (reserve arrives after 3.5 s): order cancelled, late reserve refused, stock unchanged.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">59</span>How do you make “charge the card” safe when the event can arrive twice?</h3>
+    <ul>
+      <li>Check first: if a payment row for this order exists, return it — no provider call.</li>
+      <li>Call the provider <i>outside</i> any DB transaction (never hold locks while waiting seconds on an external system), passing an <b>idempotency key = orderId</b>, so the provider itself refuses a second charge if we crash after charging but before saving.</li>
+      <li><code>UNIQUE(order_id)</code> on payments is the backstop: if two deliveries race past the check, the second insert fails and we return the first row.</li>
+      <li>Then publish the result in “must” mode: if publishing fails, the handler throws, the event is redelivered, the saved payment is found, and the result is announced again.</li>
+    </ul>
+    <p>Tested: the same <code>OrderCreated</code> delivered three times → one payment, one notification, stock sold once. A DLQ replay through the whole chain also charged nobody twice.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">60</span>What does an API gateway do, and what must it not do? Why do services still check the token?</h3>
+    <p>Mine does: routing by path prefix (a table of 8 routes), edge authentication (reject a missing/invalid JWT before it costs a service anything; admin routes need the ADMIN role), the global per-IP rate limit (shared counters in ScaleKV), <code>X-Request-Id</code> correlation, CORS, blocking <code>/internal/*</code>, 502/504 instead of hanging, and aggregation (<code>/health/ready</code> and Admin › Services combine every service’s health). Bodies are streamed, never buffered. It must <b>not</b> contain business logic (pricing, stock rules, order states) — otherwise it becomes the new monolith that every team must change. Services still verify the JWT (zero trust / defence in depth): anything that reaches a service directly, bypassing the gateway, must not find an open door.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">61</span>Shared database vs database per service — what did you choose?</h3>
+    <p>Honestly: one shared PostgreSQL, with table ownership by convention (inventory writes only <code>inventory</code>/<code>reservations</code>, payment only <code>payments</code>, …), and no foreign keys from service tables to other services’ tables. The Order Service keeps its <b>own copy</b> of the payment outcome (<code>orders.payment_status</code>) instead of reading the payments table. The remaining shortcut: catalog pages still JOIN <code>inventory</code> to show stock — a read across a boundary. Database per service gives independent schema changes, scaling and failure isolation, but costs joins and local transactions. The fixes for cross-service reads are events plus a local copy (inventory publishes <code>StockChanged</code>, the catalog keeps a read model), API composition, or CQRS. I documented the trade-off rather than pretending the split is complete.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">62</span>The order is saved but <code>OrderCreated</code> was lost. How does the system recover, and how would you prevent it?</h3>
+    <p>Two safety nets, both based on “ask the source of truth, then repair”:</p>
+    <ul>
+      <li><b>Reconciler</b> (order service, every 10 s): orders PENDING for more than 20 s are re-reserved (idempotent: “already reserved”) and <code>OrderCreated</code> is re-published. Payment finds its saved payment, so this also heals a lost <code>PaymentSucceeded</code>. Per-order exponential backoff (20 s → 5 min), and orders in backoff are excluded in the query so hopeless ones can’t starve new ones.</li>
+      <li><b>Reservation sweeper</b> (inventory service, every 30 s): reservations HELD for more than 2 min → ask the order service <code>GET /internal/orders/:id/status</code> → CONFIRMED: commit; CANCELLED or missing: release; PENDING: leave.</li>
+    </ul>
+    <p>Inside consumers, “update then publish” uses “must” mode so a failed publish is retried with the event. The real prevention is the <b>transactional outbox</b> (M7) or CDC (M8); sweepers stay useful even then, for anything stuck.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">63</span>How do you follow one request across five processes?</h3>
+    <p>With a correlation id. The gateway gives every request an <code>X-Request-Id</code> (or keeps a valid one from the client) and returns it in the response. Each service stores it in an <code>AsyncLocalStorage</code> context (a “thread-local” for async code), sends it on with every HTTP call it makes, and copies it into the headers of every event it publishes; consumers restore it from the event headers. A test places an order with <code>X-Request-Id: checkout-trace-42</code> and asserts that <code>OrderCreated</code>, <code>PaymentSucceeded</code> and <code>OrderConfirmed</code> — published by two different services on two topics — all carry it. In M9 this becomes distributed tracing (OpenTelemetry: trace and span ids, timings per hop).</p>
+  </div>
+
+  <div class="q"><h3><span class="n">64</span>What is the strangler fig pattern?</h3>
+    <p>Migrating a monolith gradually: put a gateway (façade) in front, cut out one capability at a time into a service, route its traffic there, and keep shipping — no big-bang rewrite. The name comes from a vine that grows around a tree until it replaces it. In ScaleCart the gateway went in front of the monolith, payment/inventory/notification were extracted, and what remains <i>is</i> the Order Service. The Angular app noticed nothing: same address, same API shapes (the order DTO kept its <code>payment</code> field even though the data now comes from events).</p>
+  </div>
+
+  <div class="q"><h3><span class="n">65</span>What new failure modes did microservices add that the monolith didn’t have?</h3>
+    <ul>
+      <li><b>Partial failure:</b> one service down while others are up (Q55).</li>
+      <li><b>Unknown outcomes:</b> timeouts where the work may or may not have happened (Q58).</li>
+      <li><b>Duplicates and reordering:</b> at-least-once delivery, re-publishing, DLQ replays.</li>
+      <li><b>Eventual consistency:</b> the order is PENDING for a moment; the UI must show that state.</li>
+      <li><b>Lost messages:</b> dual writes between a database and the broker (Q62).</li>
+      <li><b>Contracts:</b> event schemas must evolve compatibly (v1 and v2 <code>OrderCreated</code> both live in the log).</li>
+      <li><b>Operations:</b> seven processes to start, observe and debug; correlation ids become essential.</li>
+      <li><b>Security at the seams:</b> service identity (<code>/internal</code> token), and proxies changing what “client IP” means (Q69).</li>
+    </ul>
+  </div>
+
+  <div class="source">Lessons from building and reviewing M6</div>
+
+  <div class="q"><h3><span class="n">66</span>Why did you make event ids deterministic?</h3>
+    <p>“Order X was confirmed” is one fact, however many times it is published. In M6 events are re-published on purpose (the reconciler, “must” mode retries). With random ids, each re-publish would look like a <i>new</i> event to the idempotent consumers, and the customer would get two “Order confirmed” messages and revenue would count twice. So <code>eventId = hash(type, orderId)</code>, formatted as a UUID (version-5 style) to fit the <code>uuid</code> column: the same fact always has the same id, and <code>once()</code> recognises the duplicate. Events that can legitimately happen several times per order would need a sequence number in the hash.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">67</span>How did you handle old events after changing an event’s schema?</h3>
+    <p>In M5 <code>OrderCreated</code> (v1) was published after payment with a final status. In M6 <code>OrderCreated</code> v2 is published at placement, status PENDING, with the payment method. Old v1 events stay in the log forever and can come back through a DLQ replay, so every consumer handles both: a helper <code>outcomeOf(event)</code> maps v1 CONFIRMED/CANCELLED and v2 <code>OrderConfirmed</code>/<code>OrderCancelled</code> to one “how did this order end?” answer, and the payment consumer ignores v1 (those orders were paid inside the monolith). Rules I followed: add fields, never change their meaning; bump <code>version</code>; consumers tolerate unknown types; new consumer groups start at offset 0 and must skip history they shouldn’t act on.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">68</span>How do you test a distributed system?</h3>
+    <p>I wrote a <code>test-cluster</code> helper that starts the <i>whole</i> system inside the test process: every service as a real HTTP server on a random free port, the gateway in front, a real ScaleKV and a real ScaleLog broker, and the consumer groups. Every test goes through the gateway, services call each other over real HTTP and events go through the real broker; only the process boundary is missing. The helper can <code>stop()</code> and <code>restart()</code> a single service, which is how the “service down” tests work. Failure injection: a slow proxy for timeouts, disconnecting the broker for lost events, re-publishing for duplicates, starting the payment group late for “payment service down”. Tests wait for asynchronous outcomes by polling (<code>settle()</code>, <code>eventually()</code>) instead of sleeping. Result: 117 backend tests, run repeatedly to catch flakiness, plus a live run of all seven processes and a headless-Edge browser journey (10/10).</p>
+  </div>
+
+  <div class="q long"><h3><span class="n">69</span>Tell me about bugs the code review and tests found in M6.</h3>
+    <p>The review found 10 issues; three good stories:</p>
+    <ul>
+      <li><b>Spoofed IP behind a proxy.</b> The gateway <i>appended</i> to the client’s own <code>X-Forwarded-For</code>. The services trust the gateway (loopback), so a client sending <code>X-Forwarded-For: 1.2.3.N</code> with a new N each time looked like a new IP per request and bypassed the 10-per-minute login limit — unlimited password guessing. Fix: the gateway <i>replaces</i> the header with the one address it trusts; a regression test sends 11 logins from 11 fake IPs and expects a 429.</li>
+      <li><b>Stock held forever.</b> After a reserve timeout, the stock came back only through a best-effort release and a best-effort event; if both were lost, nothing ever released it. Fix: the inventory sweeper (Q62).</li>
+      <li><b>Doubled cart.</b> A cancelled order’s lines were <i>added</i> back to the cart; if the customer had re-added the same items meanwhile, quantities doubled. Fix: <code>max(cart, ordered)</code>.</li>
+    </ul>
+    <p>And one found by the new tests: raw SQL wrote <code>now()</code> into a <code>timestamp</code> column. The database runs in Asia/Calcutta (+5:30) but Prisma stores UTC, so every reservation looked 5.5 hours younger and the sweeper never touched it. Fix: write <code>now() AT TIME ZONE 'UTC'</code>. Lesson: one time-zone convention everywhere, or use <code>timestamptz</code>.</p>
+  </div>
+
+  <div class="q"><h3><span class="n">70</span>What is still missing, and what would you do next?</h3>
+    <ul>
+      <li><b>Shared database</b> → database per service with read models (Q61).</li>
+      <li><b>Best-effort publish + sweepers</b> → transactional outbox (M7) or CDC (M8).</li>
+      <li><b>Payment succeeded for an already-cancelled order</b> (a rare race) is only logged as “refund needed” → a saga with a <code>RefundPayment</code> compensation (M7).</li>
+      <li><b>The reserve call</b> has a timeout but no retries or circuit breaker → retries with backoff + jitter, a breaker, bulkheads (M7).</li>
+      <li><b>One shared secret</b> for service calls → mTLS or signed service tokens.</li>
+      <li><b>Every order-service instance runs the reconciler</b> → leader election or a lock (harmless today only because every step is idempotent).</li>
+      <li><b>Static service URLs</b> → service discovery and load balancing across instances.</li>
+      <li><b>Observability</b> → metrics, tracing and lag alerts (M9).</li>
+    </ul>
+    <p>Being able to list your own system’s gaps, and why each was acceptable for now, is usually worth more in an interview than claiming it is complete.</p>
+  </div>
+</section>
+
+</body>
+</html>
