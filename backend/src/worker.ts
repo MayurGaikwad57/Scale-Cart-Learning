@@ -1,9 +1,12 @@
 /**
- * A standalone consumer process:   npm run worker                    (all three groups)
+ * A standalone consumer process:   npm run worker                    (all consumer groups)
  *                                  npm run worker -- notification     (just one group)
  *
+ * M6: normally each SERVICE runs its own groups (npm run svc:payment runs "payment"). This script
+ * is for the scaling demo: an EXTRA member for a group, which takes over some of its partitions.
+ *
  * Start it in a second terminal while the API is running and the group REBALANCES: the
- * "orders" topic has 3 partitions, so the API keeps some and this worker takes the others.
+ * topic has 3 partitions, so the service keeps some and this worker takes the others.
  * Press Ctrl+C and watch the partitions move back (graceful LEAVE). Kill it hard (close the
  * terminal) and the broker notices after ~10s of missing heartbeats instead.
  */

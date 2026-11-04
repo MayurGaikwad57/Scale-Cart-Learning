@@ -16,6 +16,9 @@ export function errorMessage(err: unknown): string {
     cart_empty: 'Your cart is empty.',
     idempotency_key_reused: 'This checkout attempt was already used with different details. Please try again.',
     request_in_progress: 'Your order is still being processed. Please wait a moment.',
+    // M6: the API gateway answers these when a service behind it is down or too slow.
+    service_unavailable: 'Part of the shop is temporarily unavailable. Please try again in a moment.',
+    service_timeout: 'The shop is responding slowly right now. Please try again in a moment.',
   };
   if (body?.error && friendly[body.error]) return friendly[body.error];
   // 429: the server message says how long to wait ("... try again in 42 seconds").

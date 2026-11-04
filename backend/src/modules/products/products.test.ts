@@ -1,19 +1,24 @@
+import type { Express } from "express";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createApp } from "../../app.js";
 import { prisma } from "../../config/prisma.js";
+import { startCluster, type Cluster } from "../../test-cluster.js";
 import { cleanup, makeProduct, makeUser, RUN } from "../../test-utils.js";
 
-const app = createApp();
+let cluster: Cluster;
+let app: Express; // the API gateway, in front of the real services
 const cat = `${RUN}-cat`;
 let admin: Awaited<ReturnType<typeof makeUser>>;
 let customer: Awaited<ReturnType<typeof makeUser>>;
 
 beforeAll(async () => {
+  cluster = await startCluster();
+  app = cluster.gateway;
   admin = await makeUser("ADMIN");
   customer = await makeUser("CUSTOMER");
 });
 afterAll(async () => {
+  await cluster.close();
   await cleanup();
   await prisma.$disconnect();
 });

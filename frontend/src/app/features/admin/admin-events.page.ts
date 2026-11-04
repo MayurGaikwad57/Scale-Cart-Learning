@@ -11,11 +11,14 @@ import { Icon } from '../../shared/components/icon';
 import { MoneyPipe } from '../../shared/pipes/money.pipe';
 
 const REFRESH_MS = 3000;
-const GROUPS = ['notification', 'inventory', 'analytics'] as const;
-const GROUP_INFO: Record<string, string> = {
-  notification: 'Tells the customer: the bell in the navbar',
-  inventory: 'Flags products that run low after a sale',
-  analytics: 'Builds the daily sales report below',
+// M6: every group belongs to a SERVICE and reads one topic (see backend events/workers.ts).
+const GROUPS = ['payment', 'order', 'inventory', 'notification', 'analytics'] as const;
+const GROUP_INFO: Record<string, { text: string; service: string; topic: string }> = {
+  payment: { text: 'Charges the card for every new order', service: 'payment', topic: 'orders' },
+  order: { text: 'Confirms or cancels the order from the payment result', service: 'order', topic: 'payments' },
+  inventory: { text: 'Sells or releases the reserved stock; low-stock alerts', service: 'inventory', topic: 'orders' },
+  notification: { text: 'Tells the customer: the bell in the navbar', service: 'notification', topic: 'orders' },
+  analytics: { text: 'Builds the daily sales report below', service: 'order', topic: 'orders' },
 };
 
 interface Snapshot {
@@ -37,9 +40,10 @@ interface Snapshot {
       <div>
         <div class="sc-eyebrow">Admin</div>
         <h1 class="sc-page-title">Events</h1>
-        <p class="sc-muted mb-0">Every order publishes an <code>OrderCreated</code> event. Three consumer groups react to it independently.</p>
+        <p class="sc-muted mb-0">An order travels as events: <code>OrderCreated</code> → <code>PaymentSucceeded</code>/<code>PaymentFailed</code> → <code>OrderConfirmed</code>/<code>OrderCancelled</code>. Five consumer groups in four services react independently.</p>
       </div>
       <div class="d-flex flex-wrap gap-2">
+        <a routerLink="/admin/services" class="sc-btn sc-btn-soft"><app-icon name="layers" [size]="18" /> Services</a>
         <a routerLink="/admin/system" class="sc-btn sc-btn-soft"><app-icon name="zap" [size]="18" /> System status</a>
         <a routerLink="/admin/products" class="sc-btn sc-btn-soft"><app-icon name="grid" [size]="18" /> Products</a>
       </div>
@@ -119,7 +123,11 @@ interface Snapshot {
                 <div class="d-flex justify-content-between align-items-start gap-2">
                   <div>
                     <h2 class="h6 mb-0">{{ name }}</h2>
-                    <div class="sc-muted small">{{ info[name] }}</div>
+                    <div class="sc-muted small">{{ info[name].text }}</div>
+                    <div class="d-flex gap-1 mt-1">
+                      <span class="sc-chip-sm" title="The service that runs this consumer group">{{ info[name].service }} service</span>
+                      <span class="sc-chip-sm" title="The topic it reads">topic {{ info[name].topic }}</span>
+                    </div>
                   </div>
                   <span class="sc-pill text-nowrap flex-shrink-0" [class]="totalLag(g) === 0 ? 'sc-pill-success' : 'sc-pill-warn'" [attr.data-testid]="'lag-' + name">lag {{ totalLag(g) }}</span>
                 </div>
@@ -221,9 +229,10 @@ interface Snapshot {
       <div class="sc-card sc-card-pad">
         <h2 class="h6">Try it</h2>
         <ol class="small mb-0 sc-try">
-          <li><b>Rebalancing:</b> in a new terminal run <code>cd backend; npm run worker</code>. Each group's members split the 3 partitions. Ctrl+C the worker and the partitions move back.</li>
-          <li><b>Retry → DLQ → replay:</b> switch on <i>Chaos</i> for <i>notification</i>, place an order: it is retried 3× and lands in the DLQ, while <i>analytics</i> still counts it. Switch chaos off and press <i>Replay</i>: the notification arrives, and the other groups skip the replayed duplicate.</li>
-          <li><b>Broker down:</b> stop <code>npm run log</code> and place an order. Checkout still works, but the event is missed (the dual-write problem). Start the broker again and everything reconnects.</li>
+          <li><b>Rebalancing:</b> in a new terminal run <code>cd backend; npm run worker -- payment</code>. The payment group now has 2 members that split the 3 partitions. Ctrl+C the worker and the partitions move back.</li>
+          <li><b>Retry → DLQ → replay:</b> switch on <i>Chaos</i> for <i>notification</i>, place an order: each of its events is retried 3× and lands in the DLQ, while <i>analytics</i> still counts it. Switch chaos off and press <i>Replay</i>: the notification arrives, and every other group recognises the replayed events (no second charge, no double count).</li>
+          <li><b>Broker down:</b> stop the broker and place an order. Checkout still answers (stock reserved), but <code>OrderCreated</code> is missed and the order waits in <i>Pending</i>. Start the broker again: within ~30 s the order service's <b>reconciler</b> re-publishes it and the order completes.</li>
+          <li><b>Payment service down:</b> run the services in separate terminals (see <code>/admin/services</code>), stop <code>npm run svc:payment</code> and place orders: they wait in <i>Pending</i> and the lag of <i>payment</i> grows. Start it again and they are all charged.</li>
         </ol>
       </div>
     } @else if (!error()) {
@@ -321,7 +330,7 @@ export class AdminEventsPage {
     this.busy.set(true);
     this.events.replay(group).subscribe({
       next: (r) => {
-        this.toast.show(`${r.replayed} event(s) put back on the "orders" topic`);
+        this.toast.show(`${r.replayed} event(s) put back on the "${GROUP_INFO[group]?.topic ?? 'orders'}" topic`);
         this.busy.set(false);
       },
       error: (e) => {

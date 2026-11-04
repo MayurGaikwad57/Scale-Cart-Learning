@@ -77,6 +77,8 @@ export interface OrderItem {
 export interface Order {
   id: string;
   status: OrderStatus;
+  /** Why a CANCELLED order was cancelled: payment_declined | inventory_unavailable | out_of_stock | reservation_released */
+  statusReason: string | null;
   totalCents: number;
   createdAt: string;
   items: OrderItem[];
@@ -153,4 +155,43 @@ export interface DlqView {
 export interface Projections {
   sales: { day: string; confirmedOrders: number; cancelledOrders: number; revenueCents: number }[];
   stockAlerts: { productId: string; name: string; sku: string; available: number; updatedAt: string }[];
+}
+
+// ---- M6: Admin > Services (served by the API gateway and the payment service)
+export interface ServiceConsumer {
+  group: string;
+  topic: string;
+  memberId: string;
+  generation: number;
+  partitions: number[];
+  processed: number;
+  retries: number;
+  deadLettered: number;
+}
+
+export interface ServiceStatus {
+  service: 'order' | 'payment' | 'inventory' | 'notification';
+  url: string;
+  up: boolean;
+  latencyMs: number;
+  status: string;
+  pid?: number;
+  uptimeSeconds?: number;
+  kv?: KvStatus;
+  log?: KvStatus;
+  consumers?: ServiceConsumer[];
+  routes: string[];
+  groups: { group: string; topic: string; description: string }[];
+  traffic: { requests: number; errors: number; unavailable: number; inFlight: number; avgMs: number; lastError: string | null };
+}
+
+export interface ServicesOverview {
+  gateway: { pid: number; uptimeSeconds: number; kv: KvStatus };
+  services: ServiceStatus[];
+}
+
+export interface PaymentsOverview {
+  providerDelayMs: number;
+  totals: { status: PaymentStatus; count: number; amountCents: number }[];
+  recent: { id: string; orderId: string; amountCents: number; status: PaymentStatus; method: string | null; providerRef: string | null; createdAt: string }[];
 }

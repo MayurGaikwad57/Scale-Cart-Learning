@@ -1,25 +1,25 @@
 import { z } from "zod";
 import { Prisma } from "../../../generated/prisma/client.js";
 import { prisma } from "../../config/prisma.js";
+import { makeEvent, ORDERS_TOPIC, publishEvent, type OrderCancelled, type OrderConfirmed, type OrderCreated } from "../../events/order-events.js";
+import { callService, ServiceCallError } from "../../services/shared/http-client.js";
 import { badRequest, conflict, HttpError, notFound } from "../../utils/errors.js";
-import { publishOrderCreated } from "../../events/order-events.js";
-import { invalidateProducts } from "../products/products.cache.js";
 import { pageParams } from "../../utils/validation.js";
-import { PAYMENT_METHODS, paymentsService } from "../payments/payments.service.js";
+import { PAYMENT_METHODS } from "../payments/payments.service.js";
 
 export const createOrderSchema = z.object({ paymentMethod: z.enum(PAYMENT_METHODS) });
 export const listOrdersQuery = z.object(pageParams);
 
 const orderInclude = {
   items: { include: { product: { select: { name: true, sku: true, category: true } } }, orderBy: { id: "asc" } },
-  payments: { orderBy: { createdAt: "desc" } },
 } satisfies Prisma.OrderInclude;
 
 type OrderRow = Prisma.OrderGetPayload<{ include: typeof orderInclude }>;
 
-const toDto = (o: OrderRow) => ({
+export const toOrderDto = (o: OrderRow) => ({
   id: o.id,
   status: o.status,
+  statusReason: o.statusReason,
   totalCents: o.totalCents,
   createdAt: o.createdAt,
   items: o.items.map((i) => ({
@@ -31,10 +31,11 @@ const toDto = (o: OrderRow) => ({
     unitPriceCents: i.unitPriceCents,
     lineTotalCents: i.unitPriceCents * i.quantity,
   })),
-  payment: o.payments[0]
-    ? { status: o.payments[0].status, amountCents: o.payments[0].amountCents }
-    : null,
+  // M6: the order service's OWN copy of the payment outcome (learned from payment events), not a
+  // read of the payment service's table. Same JSON shape as before, so the UI didn't change.
+  payment: { status: o.paymentStatus, amountCents: o.totalCents },
 });
+export type OrderDto = ReturnType<typeof toOrderDto>;
 
 // Same Idempotency-Key, different body -> the client is confused; refuse rather than guess.
 function assertSameRequest(stored: string | null, incoming: string) {
@@ -43,26 +44,79 @@ function assertSameRequest(stored: string | null, incoming: string) {
   }
 }
 
+const lines = (o: OrderDto) => o.items.map((i) => ({ productId: i.productId, name: i.name, quantity: i.quantity, unitPriceCents: i.unitPriceCents }));
+
+const inventoryDown = () =>
+  new HttpError(503, "inventory_unavailable", "We couldn't check stock right now (the inventory service is unavailable). Nothing was charged - please try again in a moment.");
+
+/** The events the order service publishes about an order (one place builds them). */
+export const orderEvents = {
+  created: (o: OrderDto, userId: string, paymentMethod: string) =>
+    makeEvent<OrderCreated>("OrderCreated", 2, { orderId: o.id, userId, status: "PENDING", totalCents: o.totalCents, paymentMethod, items: lines(o) }),
+  confirmed: (o: OrderDto, userId: string) =>
+    makeEvent<OrderConfirmed>("OrderConfirmed", 1, { orderId: o.id, userId, totalCents: o.totalCents, items: lines(o) }),
+  cancelled: (o: OrderDto, userId: string) =>
+    makeEvent<OrderCancelled>("OrderCancelled", 1, { orderId: o.id, userId, totalCents: o.totalCents, reason: o.statusReason ?? "cancelled", items: lines(o) }),
+};
+
+export type ReserveOutcome = "reserved" | "insufficient_stock" | "released" | "unknown" | "unreachable";
+
+/** Synchronous call to the Inventory Service. Returns what we KNOW about the outcome. */
+export async function reserveStock(orderId: string, items: { productId: string; quantity: number }[]) {
+  try {
+    const res = await callService<{ error?: string; productId?: string; available?: number }>(
+      "inventory",
+      "POST",
+      "/internal/reservations",
+      { orderId, items },
+      { timeoutMs: 3000 },
+    );
+    if (res.status === 200 || res.status === 201) return { outcome: "reserved" as const };
+    if (res.status === 409 && res.body.error === "insufficient_stock") {
+      return { outcome: "insufficient_stock" as const, productId: res.body.productId!, available: res.body.available ?? 0 };
+    }
+    if (res.status === 409 && res.body.error === "reservation_released") return { outcome: "released" as const };
+    console.error(`[order] unexpected inventory answer ${res.status}`, res.body);
+    return { outcome: "unknown" as const };
+  } catch (e) {
+    if (!(e instanceof ServiceCallError)) throw e;
+    console.warn(`[order] reserve for ${orderId}: ${e.message}`);
+    return { outcome: e.outcomeUnknown ? ("unknown" as const) : ("unreachable" as const) };
+  }
+}
+
+/** Put an order's lines back into the customer's cart (used whenever an order does not go ahead). */
+async function restoreCart(tx: Prisma.TransactionClient, userId: string, items: { productId: string; quantity: number }[]) {
+  const cart = await tx.cart.upsert({ where: { userId }, create: { userId }, update: {} });
+  for (const i of items) {
+    await tx.cartItem.upsert({
+      where: { cartId_productId: { cartId: cart.id, productId: i.productId } },
+      create: { cartId: cart.id, productId: i.productId, quantity: i.quantity },
+      update: { quantity: { increment: i.quantity } },
+    });
+  }
+}
+
 export const ordersService = {
   /**
-   * Checkout. ONE database transaction:
-   *   lock cart -> lock stock rows (fixed order) -> reserve stock -> create order
-   *   -> charge payment -> confirm (stock sold) OR cancel (stock released)
-   * Any thrown error rolls the whole thing back, so we can never end up with an order
-   * but no stock change, or the reverse.
+   * CHECKOUT (M6). In the monolith this was ONE database transaction that did everything. Now the
+   * work is spread over three services, so it is a sequence of LOCAL steps:
    *
-   * idem (optional): if an order with this key already exists for this user, that order is
-   * returned (replayed: true) instead of creating a second one - provided the request body is
-   * the same (fingerprint), otherwise 422.
+   *   1. order svc   [local tx]  lock cart, idempotency check, create order PENDING, empty the cart
+   *   2. inventory   [sync HTTP] reserve the stock - the customer must hear "out of stock" NOW
+   *        409 out of stock -> undo step 1 (order deleted, cart restored), answer 409
+   *        not running      -> undo step 1, answer 503 (we KNOW nothing was reserved)
+   *        timeout / 5xx    -> UNKNOWN: cancel the order + ask for a release (tombstone), 503
+   *   3. publish OrderCreated (PENDING) -> payment happens ASYNCHRONOUSLY in the payment service
+   *   4. answer 201 with status PENDING; the browser polls until CONFIRMED / CANCELLED
+   *
+   * There is no transaction spanning steps 1-3. Each step is atomic on its own; failures are
+   * handled by explicit "undo" actions (COMPENSATIONS). That is the core idea of a SAGA (M7).
    */
-  async create(
-    userId: string,
-    paymentMethod: (typeof PAYMENT_METHODS)[number],
-    idem?: { key: string; fingerprint: string },
-  ) {
-    let result: { orderId: string; productIds: string[]; replayed: boolean; sold: boolean };
+  async create(userId: string, paymentMethod: (typeof PAYMENT_METHODS)[number], idem?: { key: string; fingerprint: string }) {
+    let placed: { orderId: string; replayed: boolean };
     try {
-      result = await ordersService.checkout(userId, paymentMethod, idem);
+      placed = await ordersService.place(userId, paymentMethod, idem);
     } catch (err) {
       // Last line of defence: the UNIQUE (user_id, idempotency_key) constraint. Only reachable if
       // two requests somehow got past the checks below at the same time.
@@ -78,30 +132,44 @@ export const ordersService = {
       }
       throw err;
     }
-    // Stock was sold -> that product's cached page is stale. After commit, never inside the
-    // transaction. A declined payment changed nothing in the end, so nothing to invalidate.
-    if (result.sold) await invalidateProducts(result.productIds, { catalog: false });
-    const order = await ordersService.getForUser(userId, result.orderId);
-    // Tell the rest of the system (notifications, inventory alerts, analytics) - see order-events.ts.
-    // Only for a NEW order: a replayed idempotent request already published its event.
-    // NOT awaited: the order is committed, so the customer's answer must not wait for the broker
-    // (a stalled broker could add seconds per checkout - found in code review). publishOrderCreated
-    // never throws; failures are counted in publisherStats.
-    if (!result.replayed) void publishOrderCreated(order, userId);
-    return { order, replayed: result.replayed };
+    const order = await ordersService.getForUser(userId, placed.orderId);
+    if (placed.replayed) return { order, replayed: true };
+
+    const reserve = await reserveStock(order.id, order.items);
+    if (reserve.outcome === "insufficient_stock" || reserve.outcome === "unreachable") {
+      await ordersService.undoPlacement(order.id, userId);
+      if (reserve.outcome === "unreachable") throw inventoryDown();
+      const item = order.items.find((i) => i.productId === reserve.productId);
+      const name = item?.name ?? "An item";
+      throw conflict("insufficient_stock", reserve.available === 0 ? `"${name}" is out of stock` : `Only ${reserve.available} left of "${name}"`);
+    }
+    if (reserve.outcome !== "reserved") {
+      // Outcome unknown: stock MAY be reserved. Cancel (cart restored, key freed so a retry is a
+      // fresh attempt) and make sure the stock comes back: a direct release now (best effort) AND
+      // the OrderCancelled event, which the inventory service handles even if it is down right now.
+      const cancelled = await ordersService.cancel(order.id, "inventory_unavailable", "PENDING");
+      if (cancelled) {
+        await callService("inventory", "POST", `/internal/reservations/${order.id}/release`, undefined, { timeoutMs: 1000 }).catch(() => undefined);
+        await publishEvent(ORDERS_TOPIC, orderEvents.cancelled(cancelled, userId));
+      }
+      throw inventoryDown();
+    }
+
+    // Stock is held. Hand over to the payment service. NOT awaited: the customer's answer must not
+    // wait for the broker. If this publish is lost, the RECONCILER re-publishes (see reconciler.ts).
+    void publishEvent(ORDERS_TOPIC, orderEvents.created(order, userId, paymentMethod));
+    return { order, replayed: false }; // status PENDING
   },
 
-  /** The transaction itself (see create). */
-  async checkout(userId: string, paymentMethod: (typeof PAYMENT_METHODS)[number], idem?: { key: string; fingerprint: string }) {
+  /** Step 1 of checkout: one local transaction in the order service's own tables. */
+  async place(userId: string, paymentMethod: string, idem?: { key: string; fingerprint: string }) {
     return prisma.$transaction(
       async (tx) => {
-        // 1. Serialise checkouts of the same cart. A double-click's second request waits here, then
-        //    sees an already-emptied cart.
+        // Serialise checkouts of the same cart. A double-click's second request waits here, then
+        // sees an already-emptied cart.
         await tx.$queryRaw`SELECT id FROM cart WHERE user_id = ${userId}::uuid FOR UPDATE`;
 
-        // 1b. Idempotency, database layer: "LOCK, THEN CHECK". Because we hold this user's cart
-        //     lock, no other checkout of this user can be between this check and our insert, so
-        //     the check cannot race. (Users without a cart row yet have nothing to order anyway.)
+        // Idempotency, database layer: "LOCK, THEN CHECK" (we hold this user's cart lock).
         if (idem) {
           const existing = await tx.order.findFirst({
             where: { userId, idempotencyKey: idem.key },
@@ -109,111 +177,92 @@ export const ordersService = {
           });
           if (existing) {
             assertSameRequest(existing.idempotencyFingerprint, idem.fingerprint);
-            return { orderId: existing.id, productIds: [], replayed: true, sold: false };
+            return { orderId: existing.id, replayed: true };
           }
         }
 
-        const cart = await tx.cart.findUnique({
-          where: { userId },
-          include: { items: { include: { product: true } } },
-        });
+        const cart = await tx.cart.findUnique({ where: { userId }, include: { items: { include: { product: true } } } });
         if (!cart || cart.items.length === 0) throw badRequest("cart_empty", "Your cart is empty");
-
         const inactive = cart.items.find((i) => !i.product.active);
         if (inactive) throw conflict("product_unavailable", `"${inactive.product.name}" is no longer available`);
 
-        // 2. Lock the stock rows. ORDER BY product_id gives every transaction the same lock order,
-        //    which prevents deadlocks between two carts that share products. Other buyers of these
-        //    products block here until we commit, so the availability check below cannot be stale.
-        const ids = cart.items.map((i) => i.productId);
-        const locked = await tx.$queryRaw<{ product_id: string; available: number }[]>`
-          SELECT product_id, available FROM inventory
-          WHERE product_id IN (${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))})
-          ORDER BY product_id
-          FOR UPDATE`;
-        const available = new Map(locked.map((r) => [r.product_id, r.available]));
-
-        for (const item of cart.items) {
-          const have = available.get(item.productId) ?? 0;
-          if (have < item.quantity) {
-            throw conflict(
-              "insufficient_stock",
-              have === 0
-                ? `"${item.product.name}" is out of stock`
-                : `Only ${have} left of "${item.product.name}"`,
-            );
-          }
-        }
-
-        // 3. Reserve: available -> reserved.
-        for (const item of cart.items) {
-          await tx.inventory.update({
-            where: { productId: item.productId },
-            data: {
-              available: { decrement: item.quantity },
-              reserved: { increment: item.quantity },
-              version: { increment: 1 },
-            },
-          });
-        }
-
-        // 4. Create the order with a price snapshot of every line.
+        // Price snapshot of every line. Stock is NOT touched here: it isn't ours any more.
         const totalCents = cart.items.reduce((sum, i) => sum + i.product.priceCents * i.quantity, 0);
         const order = await tx.order.create({
           data: {
             userId,
             totalCents,
+            paymentMethod,
             idempotencyKey: idem?.key,
             idempotencyFingerprint: idem?.fingerprint,
-            items: {
-              create: cart.items.map((i) => ({
-                productId: i.productId,
-                quantity: i.quantity,
-                unitPriceCents: i.product.priceCents,
-              })),
-            },
+            items: { create: cart.items.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPriceCents: i.product.priceCents })) },
           },
         });
-
-        // 5. Pay, then settle.
-        const payment = await paymentsService.charge(tx, { orderId: order.id, amountCents: totalCents, method: paymentMethod });
-
-        if (payment.status === "SUCCEEDED") {
-          // Reservation becomes a sale; the cart is consumed.
-          for (const item of cart.items) {
-            await tx.inventory.update({
-              where: { productId: item.productId },
-              data: { reserved: { decrement: item.quantity }, version: { increment: 1 } },
-            });
-          }
-          await tx.order.update({ where: { id: order.id }, data: { status: "CONFIRMED" } });
-          await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
-        } else {
-          // Compensation: give the reserved stock back and cancel. The order is kept (as CANCELLED)
-          // so the user can see what happened; the cart is kept so they can retry.
-          for (const item of cart.items) {
-            await tx.inventory.update({
-              where: { productId: item.productId },
-              data: {
-                available: { increment: item.quantity },
-                reserved: { decrement: item.quantity },
-                version: { increment: 1 },
-              },
-            });
-          }
-          await tx.order.update({ where: { id: order.id }, data: { status: "CANCELLED" } });
-        }
-        return { orderId: order.id, productIds: ids, replayed: false, sold: payment.status === "SUCCEEDED" };
+        // The cart becomes the order. If the order doesn't go ahead, restoreCart() puts it back.
+        await tx.cartItem.deleteMany({ where: { cartId: cart.id } });
+        return { orderId: order.id, replayed: false };
       },
       { maxWait: 5_000, timeout: 10_000 },
     );
+  },
+
+  /** Compensation for step 1 when we KNOW nothing was reserved: as if the order never existed. */
+  async undoPlacement(orderId: string, userId: string) {
+    await prisma.$transaction(async (tx) => {
+      const items = await tx.orderItem.findMany({ where: { orderId } });
+      await restoreCart(tx, userId, items);
+      await tx.order.delete({ where: { id: orderId } }); // order_items cascade
+    });
+  },
+
+  /**
+   * PENDING -> CANCELLED (+ cart restored). Returns the order, or null if it was not PENDING any
+   * more (already settled by someone else - e.g. the reconciler and a payment event racing).
+   * The row lock makes "check status, then change it" safe against that race.
+   */
+  async cancel(orderId: string, reason: string, paymentStatus: "PENDING" | "FAILED") {
+    const changed = await prisma.$transaction(async (tx) => {
+      const [row] = await tx.$queryRaw<{ status: string; user_id: string }[]>`
+        SELECT status::text, user_id FROM orders WHERE id = ${orderId}::uuid FOR UPDATE`;
+      if (!row || row.status !== "PENDING") return false;
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          status: "CANCELLED",
+          statusReason: reason,
+          paymentStatus,
+          // inventory_unavailable: the customer was answered 503 ("try again") and the browser
+          // retries with the SAME key - that retry must start a NEW order, not replay this cancelled
+          // one, so the key is freed. In every other case the customer already got 201 for this
+          // order: the key keeps pointing at it (a reuse with a different body stays a 422).
+          ...(reason === "inventory_unavailable" ? { idempotencyKey: null } : {}),
+        },
+      });
+      await restoreCart(tx, row.user_id, await tx.orderItem.findMany({ where: { orderId } }));
+      return true;
+    });
+    return changed ? ordersService.get(orderId) : null;
+  },
+
+  /** PENDING -> CONFIRMED. Returns the order, or null if it was not PENDING. */
+  async confirm(orderId: string) {
+    const { count } = await prisma.order.updateMany({
+      where: { id: orderId, status: "PENDING" }, // conditional update = atomic "only if still PENDING"
+      data: { status: "CONFIRMED", paymentStatus: "SUCCEEDED" },
+    });
+    return count ? ordersService.get(orderId) : null;
+  },
+
+  async get(orderId: string) {
+    const order = await prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
+    return order && { ...toOrderDto(order), userId: order.userId, paymentMethod: order.paymentMethod };
   },
 
   async getForUser(userId: string, orderId: string) {
     // Filtering by userId means someone else's order is a 404 (not a 403 that confirms it exists).
     const order = await prisma.order.findFirst({ where: { id: orderId, userId }, include: orderInclude });
     if (!order) throw notFound("order_not_found");
-    return toDto(order);
+    return toOrderDto(order);
   },
 
   async list(userId: string, q: z.infer<typeof listOrdersQuery>) {
@@ -227,6 +276,6 @@ export const ordersService = {
       }),
       prisma.order.count({ where: { userId } }),
     ]);
-    return { items: rows.map(toDto), total, page: q.page, pageSize: q.pageSize };
+    return { items: rows.map(toOrderDto), total, page: q.page, pageSize: q.pageSize };
   },
 };

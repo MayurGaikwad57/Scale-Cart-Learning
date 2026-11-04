@@ -1,10 +1,11 @@
 import { Prisma } from "../../generated/prisma/client.js";
 import { prisma } from "../config/prisma.js";
-import type { OrderCreated } from "./order-events.js";
+import type { OrderEvent } from "./order-events.js";
 
 /**
- * The three consumer groups. Each one receives EVERY OrderCreated event independently and keeps
- * its own offsets - a slow or broken analytics consumer never delays notifications.
+ * Consumer handlers that live in more than one service, plus once(). Every consumer group receives
+ * EVERY event of its topic independently and keeps its own offsets - a slow or broken analytics
+ * consumer never delays notifications.
  */
 
 export const LOW_STOCK_THRESHOLD = 5;
@@ -39,51 +40,59 @@ export async function once(group: string, eventId: string, work: (tx: Prisma.Tra
   }
 }
 
+
 const rupees = (cents: number) =>
   (cents / 100).toLocaleString("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
 const shortId = (id: string) => id.slice(0, 8).toUpperCase();
 
-/** notification: tell the customer what happened to their order (the bell in the navbar). */
-export async function notificationHandler(e: OrderCreated) {
-  const { orderId, userId, status, totalCents } = e.data;
-  const message =
-    status === "CONFIRMED"
-      ? { title: "Order confirmed", body: `Your order #${shortId(orderId)} for ${rupees(totalCents)} is confirmed.` }
-      : { title: "Payment declined", body: `Order #${shortId(orderId)} was cancelled because the payment was declined. Your cart is still saved.` };
+/**
+ * Turns any order event into "how did this order END?", or null if it hasn't ended yet.
+ *   v2 OrderCreated (PENDING)      -> null: payment hasn't happened, nothing to tell anyone yet
+ *   OrderConfirmed / OrderCancelled -> the outcome (M6)
+ *   v1 OrderCreated CONFIRMED/CANCELLED -> the outcome (M5 events still in the log, or replayed)
+ */
+export function outcomeOf(e: OrderEvent): { confirmed: boolean; reason: string | null } | null {
+  if (e.type === "OrderConfirmed") return { confirmed: true, reason: null };
+  if (e.type === "OrderCancelled") return { confirmed: false, reason: e.data.reason };
+  if (e.type === "OrderCreated" && e.data.status !== "PENDING") {
+    return { confirmed: e.data.status === "CONFIRMED", reason: e.data.status === "CANCELLED" ? "payment_declined" : null };
+  }
+  return null;
+}
+
+const CANCEL_TEXT: Record<string, string> = {
+  payment_declined: "was cancelled because the payment was declined. Your cart is still saved.",
+  inventory_unavailable: "could not be completed because our stock system was unavailable. Nothing was charged and your cart is still saved.",
+  reservation_released: "was cancelled because the reserved stock was released. Nothing was charged and your cart is still saved.",
+  out_of_stock: "was cancelled because an item sold out before it could be reserved. Nothing was charged and your cart is still saved.",
+};
+
+/** notification service: tell the customer what happened to their order (the bell in the navbar). */
+export async function notificationHandler(e: OrderEvent) {
+  const outcome = outcomeOf(e);
+  if (!outcome) return "skipped";
+  const { orderId, userId, totalCents } = e.data;
+  const message = outcome.confirmed
+    ? { title: "Order confirmed", body: `Your order #${shortId(orderId)} for ${rupees(totalCents)} is confirmed.` }
+    : {
+        title: outcome.reason === "payment_declined" ? "Payment declined" : "Order cancelled",
+        body: `Order #${shortId(orderId)} ${CANCEL_TEXT[outcome.reason ?? ""] ?? "was cancelled."}`,
+      };
   return once("notification", e.eventId, async (tx) => {
     await tx.notification.create({ data: { userId, orderId, ...message } });
   });
 }
 
-/** inventory: after a sale, flag products that are running low so the admin can restock. */
-export async function inventoryHandler(e: OrderCreated) {
-  if (e.data.status !== "CONFIRMED") return "skipped";
-  const ids = e.data.items.map((i) => i.productId);
-  return once("inventory", e.eventId, async (tx) => {
-    // Read the CURRENT stock, not the event's numbers: other orders may have happened since.
-    const rows = await tx.inventory.findMany({ where: { productId: { in: ids } } });
-    for (const r of rows) {
-      if (r.available <= LOW_STOCK_THRESHOLD) {
-        await tx.stockAlert.upsert({
-          where: { productId: r.productId },
-          create: { productId: r.productId, available: r.available, lastOrderId: e.data.orderId },
-          update: { available: r.available, lastOrderId: e.data.orderId },
-        });
-      } else {
-        await tx.stockAlert.deleteMany({ where: { productId: r.productId } }); // restocked meanwhile
-      }
-    }
-  });
-}
-
 /**
- * analytics: a READ MODEL (projection) built only from events - daily orders and revenue.
- * "revenue += total" is NOT naturally idempotent (a duplicate would count twice), which is exactly
- * why it runs inside once().
+ * analytics (runs in the order service): a READ MODEL (projection) built only from events - daily
+ * orders and revenue. "revenue += total" is NOT naturally idempotent (a duplicate would count
+ * twice), which is exactly why it runs inside once().
  */
-export async function analyticsHandler(e: OrderCreated) {
+export async function analyticsHandler(e: OrderEvent) {
+  const outcome = outcomeOf(e);
+  if (!outcome) return "skipped";
   const day = new Date(e.occurredAt.slice(0, 10) + "T00:00:00.000Z"); // UTC calendar day
-  const confirmed = e.data.status === "CONFIRMED";
+  const { confirmed } = outcome;
   return once("analytics", e.eventId, async (tx) => {
     await tx.salesDaily.upsert({
       where: { day },

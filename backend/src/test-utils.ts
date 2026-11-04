@@ -35,6 +35,8 @@ export async function cleanup() {
   const orders = await prisma.order.findMany({ where: { userId: { in: userIds } }, select: { id: true } });
   const orderIds = orders.map((o) => o.id);
   await prisma.payment.deleteMany({ where: { orderId: { in: orderIds } } });
+  await prisma.reservation.deleteMany({ where: { orderId: { in: orderIds } } }); // M6 (items cascade)
+  await prisma.reservationItem.deleteMany({ where: { productId: { in: productIds } } });
   await prisma.orderItem.deleteMany({ where: { OR: [{ orderId: { in: orderIds } }, { productId: { in: productIds } }] } });
   await prisma.order.deleteMany({ where: { id: { in: orderIds } } });
   await prisma.cartItem.deleteMany({ where: { productId: { in: productIds } } });

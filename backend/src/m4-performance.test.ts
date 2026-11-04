@@ -1,16 +1,18 @@
 import { randomUUID } from "node:crypto";
+import type { Express } from "express";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { createApp } from "./app.js";
 import { kv } from "./config/kv.js";
 import { prisma } from "./config/prisma.js";
 import { startKvServer, type RunningKvServer } from "./kv/server.js";
+import { settle, startCluster, eventually, type Cluster } from "./test-cluster.js";
 import { cleanup, makeProduct, makeUser, RUN } from "./test-utils.js";
 
 // M4: caching, rate limiting and idempotency, end-to-end through the HTTP API with a REAL
-// ScaleKV server (in this process, on a random port).
+// ScaleKV server (in this process, on a random port). M6: through the gateway, to the real services.
 
-const app = createApp();
+let cluster: Cluster;
+let app: Express;
 let server: RunningKvServer;
 let admin: Awaited<ReturnType<typeof makeUser>>;
 type U = Awaited<ReturnType<typeof makeUser>>;
@@ -19,9 +21,12 @@ beforeAll(async () => {
   server = await startKvServer({ port: 0 });
   kv.connect(`kv://127.0.0.1:${server.port}`);
   await kv.waitUntilReady();
+  cluster = await startCluster({ log: true }); // this file manages ScaleKV itself (it kills it below)
+  app = cluster.gateway;
   admin = await makeUser("ADMIN");
 });
 afterAll(async () => {
+  await cluster.close();
   await kv.disconnect();
   await server.close();
   await cleanup();
@@ -111,8 +116,8 @@ describe("cache-aside: product detail", () => {
   });
 });
 
-describe("checkout invalidates only what it must", () => {
-  it("a sale refreshes that product's page but keeps the list cache; a declined payment invalidates nothing", async () => {
+describe("stock movements invalidate only what they must", () => {
+  it("each reserve / release refreshes that product's page but keeps the list cache", async () => {
     const p = await makeProduct(10);
     const catalogVer = () => server.store.execute(["GET", "products:ver"]);
     const productVer = () => server.store.execute(["GET", `product:ver:${p.id}`]);
@@ -120,13 +125,18 @@ describe("checkout invalidates only what it must", () => {
 
     const declined = await makeUser();
     await addToCart(declined, p.id);
-    expect((await placeOrder(declined, undefined, "TEST_CARD_DECLINE")).body.status).toBe("CANCELLED");
-    expect(productVer()).toBeNull(); // net stock unchanged -> nothing to invalidate
+    const order = await placeOrder(declined, undefined, "TEST_CARD_DECLINE");
+    expect(productVer()).toBe("1"); // M6: the RESERVATION already changed "available" -> refreshed
+    expect((await settle(app, declined.auth, order.body.id)).status).toBe("CANCELLED");
+    await eventually(async () => productVer() === "2"); // the RELEASE gave it back -> refreshed again
 
     const buyer = await makeUser();
     await addToCart(buyer, p.id);
-    expect((await placeOrder(buyer)).status).toBe(201);
-    expect(productVer()).toBe("1"); // product page refreshed
+    const sale = await placeOrder(buyer);
+    expect(sale.status).toBe(201);
+    expect(productVer()).toBe("3"); // reserved -> refreshed
+    await settle(app, buyer.auth, sale.body.id);
+    expect(productVer()).toBe("3"); // the commit moves reserved -> sold: "available" unchanged, cache kept
     expect(catalogVer()).toBe(verBefore); // list pages + categories untouched (hit rate survives)
   });
 });
@@ -256,7 +266,8 @@ describe("idempotent order creation", () => {
     const u = await makeUser();
     await addToCart(u, (await makeProduct(5)).id);
     const key = randomUUID();
-    expect((await placeOrder(u, key, "TEST_CARD_DECLINE")).body.status).toBe("CANCELLED");
+    const declined = await placeOrder(u, key, "TEST_CARD_DECLINE");
+    expect((await settle(app, u.auth, declined.body.id)).status).toBe("CANCELLED");
     flush(); // the fast ScaleKV record is gone - only the order row remembers the key
     const misuse = await placeOrder(u, key, "TEST_CARD_SUCCESS");
     expect(misuse.status).toBe(422);

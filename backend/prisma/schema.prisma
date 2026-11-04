@@ -106,6 +106,13 @@ model Order {
   // SHA-256 of the request body that used the key: the same key with a DIFFERENT body is a client
   // bug (422), even after the fast ScaleKV record is gone.
   idempotencyFingerprint String? @map("idempotency_fingerprint")
+  // M6: the ORDER SERVICE's own copy of what it knows about the payment. It no longer reads the
+  // payments table (that belongs to the Payment Service); it learns the outcome from the
+  // PaymentSucceeded / PaymentFailed events. Copying data between services is normal.
+  paymentMethod  String?       @map("payment_method")
+  paymentStatus  PaymentStatus @default(PENDING) @map("payment_status")
+  // Why a CANCELLED order was cancelled: payment_declined | inventory_unavailable | reservation_released
+  statusReason   String?       @map("status_reason")
   createdAt      DateTime    @default(now()) @map("created_at")
 
   user     User        @relation(fields: [userId], references: [id])
@@ -115,6 +122,8 @@ model Order {
   @@unique([userId, idempotencyKey])
   // Serves order history: newest orders for a user.
   @@index([userId, createdAt(sort: Desc)])
+  // M6: the reconciler's query "PENDING orders older than N seconds".
+  @@index([status, createdAt])
   @@map("orders")
 }
 
@@ -138,10 +147,13 @@ model Payment {
   amountCents Int           @map("amount_cents")
   status      PaymentStatus @default(PENDING)
   providerRef String?       @map("provider_ref")
+  method      String?
   createdAt   DateTime      @default(now()) @map("created_at")
   order       Order         @relation(fields: [orderId], references: [id])
 
-  @@index([orderId])
+  // M6: ONE payment per order. The Payment Service can receive the same OrderCreated more than
+  // once (at-least-once delivery, re-publishing); this constraint makes a double charge impossible.
+  @@unique([orderId])
   @@map("payments")
 }
 
@@ -194,4 +206,36 @@ model SalesDaily {
   revenueCents    BigInt   @default(0) @map("revenue_cents")
 
   @@map("sales_daily")
+}
+
+// ---------------------------------------------------------------- M6: Inventory Service
+
+enum ReservationStatus {
+  HELD // stock moved available -> reserved, waiting for the order's outcome
+  COMMITTED // order confirmed: the reserved units are sold (reserved -= qty)
+  RELEASED // order cancelled: units went back to available. Also a TOMBSTONE for a reservation
+  // that never happened, so a late duplicate "reserve" for that order is refused.
+}
+
+// Owned by the Inventory Service. Note: NO foreign key to orders - orders belong to another
+// service (in a real deployment, another database). Services refer to each other only by id.
+model Reservation {
+  orderId   String            @id @map("order_id") @db.Uuid
+  status    ReservationStatus @default(HELD)
+  createdAt DateTime          @default(now()) @map("created_at")
+  updatedAt DateTime          @updatedAt @map("updated_at")
+  items     ReservationItem[]
+
+  @@index([status, createdAt])
+  @@map("reservations")
+}
+
+model ReservationItem {
+  orderId     String      @map("order_id") @db.Uuid
+  productId   String      @map("product_id") @db.Uuid
+  quantity    Int
+  reservation Reservation @relation(fields: [orderId], references: [orderId], onDelete: Cascade)
+
+  @@id([orderId, productId])
+  @@map("reservation_items")
 }
