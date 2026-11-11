@@ -4,7 +4,9 @@ import { authenticate } from "@scalecart/service-kit/auth";
 import { limits } from "@scalecart/service-kit/rate-limit";
 import { validateBody } from "@scalecart/service-kit/validate";
 import { idParams } from "@scalecart/service-kit/validation";
-import { createOrderSchema, listOrdersQuery, ordersService } from "./orders.service.js";
+import { checkout } from "./checkout.saga.js";
+import { ordersService } from "./orders.service.js";
+import { createOrderSchema, listOrdersQuery } from "./orders.validation.js";
 
 export const ordersRouter = Router();
 ordersRouter.use(authenticate);
@@ -20,7 +22,7 @@ ordersRouter.post("/", limits.orders, validateBody(createOrderSchema), async (re
     key,
     fingerprint: fp,
     run: async () => {
-      const { order, replayed } = await ordersService.create(userId, req.body.paymentMethod, key ? { key, fingerprint: fp } : undefined);
+      const { order, replayed } = await checkout(userId, req.body.paymentMethod, key ? { key, fingerprint: fp } : undefined);
       return { status: 201, body: order, replayed };
     },
   });

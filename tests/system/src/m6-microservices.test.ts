@@ -14,7 +14,8 @@ import { startWorkers } from "./test-cluster.js";
 import { serviceUrls } from "@scalecart/service-kit/registry";
 import { reconcileOnce } from "@scalecart/order/reconciler";
 import { sweepOnce } from "@scalecart/inventory/sweeper";
-import { MAX_ORDER_LINES, ordersService } from "@scalecart/order/modules/orders/orders.service";
+import { ordersService } from "@scalecart/order/modules/orders/orders.service";
+import { MAX_ORDER_LINES } from "@scalecart/order/modules/orders/orders.validation";
 import { eventually, settle, startCluster, type Cluster } from "./test-cluster.js";
 import { cleanup, makeProduct, makeProducts, makeUser } from "./test-utils.js";
 
