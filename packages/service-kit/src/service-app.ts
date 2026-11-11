@@ -23,6 +23,12 @@ export interface ServiceDb {
   disconnect: () => Promise<void>;
 }
 
+/** The ServiceDb of a Prisma client (any service's generated client has these two methods). */
+export const prismaDb = (client: { $queryRawUnsafe(sql: string): Promise<unknown>; $disconnect(): Promise<void> }): ServiceDb => ({
+  ping: () => client.$queryRawUnsafe("SELECT 1"),
+  disconnect: () => client.$disconnect(),
+});
+
 export function createServiceApp(name: ServiceName, mount: (app: Express) => void, opts: { db?: ServiceDb } = {}): Express {
   const app = express();
   // Requests arrive THROUGH THE GATEWAY, so the TCP peer is the gateway, not the customer. Trusting
