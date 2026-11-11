@@ -26,11 +26,13 @@ export const baseEnvSchema = z.object({
   // SERVICE DISCOVERY: where each service listens / can be reached. Locally: 127.0.0.1 + its port.
   // In Kubernetes these would be service DNS names like http://inventory:3003 - only config changes.
   IDENTITY_PORT: z.coerce.number().default(3005),
+  CATALOG_PORT: z.coerce.number().default(3006),
   ORDER_PORT: z.coerce.number().default(3001),
   PAYMENT_PORT: z.coerce.number().default(3002),
   INVENTORY_PORT: z.coerce.number().default(3003),
   NOTIFICATION_PORT: z.coerce.number().default(3004),
   IDENTITY_SERVICE_URL: z.string().optional(),
+  CATALOG_SERVICE_URL: z.string().optional(),
   ORDER_SERVICE_URL: z.string().optional(),
   PAYMENT_SERVICE_URL: z.string().optional(),
   INVENTORY_SERVICE_URL: z.string().optional(),

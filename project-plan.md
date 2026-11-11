@@ -1311,7 +1311,7 @@ Use these exact checkpoints.
 * [x] Phase 2: one app per service
 * [x] Phase 3: database per service
 * [x] Phase 4: identity service (RS256 + JWKS)
-* [ ] Phase 5: catalog service
+* [x] Phase 5: catalog service
 * [ ] Phase 6: Dockerfile + CI per service
 
 ## M7 — Reliability

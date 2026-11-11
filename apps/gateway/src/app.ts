@@ -13,7 +13,7 @@ import { proxyStats, proxyTo } from "./proxy.js";
 
 /**
  * API GATEWAY (:3000) - the single front door. The Angular app still talks to ONE address and has
- * no idea that there are now five services behind it.
+ * no idea that there are now six services behind it.
  *
  * Its jobs (and ONLY these - no business logic here, or the gateway becomes a new monolith):
  *   ROUTING           path prefix -> service (the table below)
@@ -33,10 +33,11 @@ export const ROUTES: { prefix: string; service: ServiceName; access: Access; tim
   { prefix: "/notifications", service: "notification", access: "user" },
   { prefix: "/inventory", service: "inventory", access: "public" }, // POST is admin-only, checked by the service
   { prefix: "/admin/payments", service: "payment", access: "admin" },
+  { prefix: "/admin/system", service: "catalog", access: "admin" }, // the product cache lives in the catalog
   { prefix: "/admin", service: "order", access: "admin" },
   { prefix: "/orders", service: "order", access: "user", timeoutMs: 20_000 }, // checkout calls inventory too
   { prefix: "/cart", service: "order", access: "user" },
-  { prefix: "/products", service: "order", access: "public" },
+  { prefix: "/products", service: "catalog", access: "public" },
   { prefix: "/auth", service: "identity", access: "public" }, // /auth/me checks the token itself
 ];
 

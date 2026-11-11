@@ -69,7 +69,7 @@ while coding) and as compiled JavaScript in production (`tsc -b` builds them fir
 | 2 | **One app per service** — `apps/<name>` with own `package.json`, env schema, scripts; owned modules move in; event handlers split per app; lint rule "no app imports another app" | ✅ see "Phase 2 — what changed" below |
 | 3 | **Database per service** — 4 databases + 4 DB users, own Prisma schema + migrations per app, no cross-DB foreign keys, own `processed_events`, `/internal/stock-alerts`, one-time data migration script (old DB kept as a backup) | ✅ see "Phase 3 — what changed" below |
 | 4 | **Identity service** — users/auth out of order, own DB, RS256 + JWKS, gateway routes `/auth` → identity | ✅ see "Phase 4 — what changed" below |
-| 5 | **Catalog service** — products out of order, own DB, `ProductCreated/Updated` + `StockChanged` events, stock copy, cart/checkout call catalog, gateway routes `/products` → catalog | catalog, cart, checkout, admin product CRUD work end to end |
+| 5 | **Catalog service** — products out of order, own DB, `ProductCreated/Updated` + `StockChanged` events, stock copy, cart/checkout call catalog, gateway routes `/products` → catalog | ✅ see "Phase 5 — what changed" below |
 | 6 | **Deploy per service** — Dockerfile per app, `docker-compose.yml`, GitHub Actions per app | CI green for every app |
 
 ## Phase 2 — what changed
@@ -132,6 +132,22 @@ while coding) and as compiled JavaScript in production (`tsc -b` builds them fir
   a missing `kid` and the algorithm-confusion attack.
 - Not done (next steps in a real system): refresh tokens with rotation, HttpOnly-cookie sessions (the frontend keeps
   the token in localStorage), logout / token revocation, an off-the-shelf IdP (Keycloak, Auth0, Cognito).
+
+## Phase 5 — what changed
+
+- **`apps/catalog`** (:3006, database `scalecart_catalog`, user `catalog_svc`): `/products` (search, filter, admin CRUD),
+  the product cache in ScaleKV, `/admin/system` (cache + ScaleKV status), and `POST /internal/products/batch`.
+  It publishes `ProductCreated` / `ProductUpdated` and runs the `product_stock` group (its copy of the stock).
+- Products moved out of the order database (`npm run db:move-products-to-catalog`, then the order migration
+  `2_products_moved_to_catalog`, written by hand because it must **backfill** before it drops).
+- The order service now **asks** the catalog:
+  - the **cart** gets names / prices / stock in ONE batch call (no N+1). Catalog down -> the cart still loads with
+    the lines marked unavailable (`degraded: "catalog_unavailable"`), checkout answers 503 and keeps the cart;
+  - **checkout** fetches the prices BEFORE its transaction (never hold database locks across a network call),
+    re-checks under the lock that the cart didn't change, and stores a **snapshot** (name, sku, category, price)
+    on every order line - a past order never changes when a product is renamed or re-priced, and showing an
+    order no longer needs the catalog.
+- New tests: snapshot survives a rename, checkout uses the current catalog price, catalog-down behaviour.
 
 ## Known gaps (on purpose)
 

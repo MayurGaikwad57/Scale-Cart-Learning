@@ -1,0 +1,31 @@
+// CATALOG SERVICE database (scalecart_catalog) - the products. Nobody else can connect to it:
+// the order service ASKS (POST /internal/products/batch), the inventory service LISTENS (ProductCreated).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Product {
+  id          String   @id @default(uuid()) @db.Uuid
+  sku         String   @unique
+  name        String
+  description String   @default("")
+  priceCents  Int      @map("price_cents")
+  category    String
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  // OUR COPY of the stock (the inventory service owns the real number in ITS database), kept up to
+  // date by StockChanged events. stockVersion = the inventory row's version, so an older event
+  // arriving late can never overwrite a newer number. The checkout still asks inventory to reserve.
+  stockAvailable Int @default(0) @map("stock_available")
+  stockVersion   Int @default(-1) @map("stock_version")
+
+  // Serves the catalog filter (category) + price sort/range.
+  @@index([category, priceCents])
+  @@map("products")
+}

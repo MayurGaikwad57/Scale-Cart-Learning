@@ -1,8 +1,6 @@
 import { cartRouter } from "./modules/cart/cart.routes.js";
 import { eventsRouter } from "./modules/events/events.routes.js";
 import { ordersRouter } from "./modules/orders/orders.routes.js";
-import { productsRouter } from "./modules/products/products.routes.js";
-import { systemRouter } from "./modules/system/system.routes.js";
 import { Router } from "express";
 import { z } from "zod";
 import { db, prisma } from "./config/prisma.js";
@@ -28,15 +26,13 @@ internal.get("/orders/:id/status", async (req, res) => {
  * and notification. This is the STRANGLER FIG pattern: services are cut out of the monolith one by
  * one, behind a gateway, while everything keeps working - no big-bang rewrite.
  *
- * Still in here: product catalog, cart, orders, admin (system + events pages) and the
- * analytics projection. In a bigger system "catalog" and "users" would be the next extractions.
+ * Still in here: cart, checkout (the saga), orders, the admin Events page and the analytics
+ * projection. Users moved to the identity service, products to the catalog service (M6.5).
  */
 export const createOrderApp = () =>
   createServiceApp("order", (app) => {
-    app.use("/products", productsRouter);
     app.use("/cart", cartRouter);
     app.use("/orders", ordersRouter);
-    app.use("/admin/system", systemRouter);
     app.use("/admin/events", eventsRouter);
     app.use("/internal", internal);
   }, { db });

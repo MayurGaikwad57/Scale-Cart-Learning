@@ -1,7 +1,7 @@
 // Development seed: sample products. Safe to run repeatedly (upserts by sku).
 //   npm run seed        (with ScaleLog running: npm run dev). The admin account is seeded by the identity service.
 //
-// M6.5: products live in the ORDER service's database, their stock in the INVENTORY service's. The
+// M6.5: products live in the CATALOG service's database, their stock in the INVENTORY service's. The
 // seed creates the products here and publishes ProductCreated for each NEW one; the inventory
 // service creates the stock rows from those events (it is the only one that writes its database).
 import { deterministicEventId, makeEvent, type ProductCreated } from "@scalecart/events";

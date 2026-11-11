@@ -1,7 +1,8 @@
 // ORDER SERVICE database (scalecart_order) - only the tables the order service OWNS.
 // No other service can connect to this database (own DB user, CONNECT revoked from everyone else).
-// Users live in the IDENTITY service's database since M6.5 phase 4: here a user is just an id
-// (from the token) on carts and orders - no foreign key. Products stay until the catalog service.
+// Users live in the IDENTITY service's database (phase 4) and products in the CATALOG service's
+// (phase 5): here they are just ids on carts and orders - no foreign keys - plus a snapshot of the
+// product on every order line.
 // Money is stored as integer cents. IDs are UUIDs.
 
 generator client {
@@ -25,30 +26,6 @@ enum PaymentStatus {
   FAILED
 }
 
-model Product {
-  id          String   @id @default(uuid()) @db.Uuid
-  sku         String   @unique
-  name        String
-  description String   @default("")
-  priceCents  Int      @map("price_cents")
-  category    String
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now()) @map("created_at")
-  // M6.5: OUR COPY of the stock (the inventory service owns the real number in ITS database).
-  // Kept up to date by StockChanged events; stockVersion = the inventory row's version, so an
-  // older event arriving late can never overwrite a newer number. Shown on product pages and the
-  // cart; the checkout still asks the inventory service (the source of truth) to reserve.
-  stockAvailable Int @default(0) @map("stock_available")
-  stockVersion   Int @default(-1) @map("stock_version")
-
-  cartItems  CartItem[]
-  orderItems OrderItem[]
-
-  // Serves the catalog filter (category) + price sort/range.
-  @@index([category, priceCents])
-  @@map("products")
-}
-
 model Cart {
   id     String     @id @default(uuid()) @db.Uuid
   // The identity service's user id (from the verified token). No foreign key: users are in another database.
@@ -61,10 +38,11 @@ model Cart {
 model CartItem {
   id        String  @id @default(uuid()) @db.Uuid
   cartId    String  @map("cart_id") @db.Uuid
+  // The catalog service's product id (no foreign key - another database). Name, price and stock are
+  // asked from the catalog when the cart is shown.
   productId String  @map("product_id") @db.Uuid
   quantity  Int
   cart      Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  product   Product @relation(fields: [productId], references: [id])
 
   @@unique([cartId, productId])
   @@map("cart_items")
@@ -100,12 +78,16 @@ model Order {
 model OrderItem {
   id             String  @id @default(uuid()) @db.Uuid
   orderId        String  @map("order_id") @db.Uuid
+  // The catalog service's product id. No foreign key: products live in the catalog's database.
   productId      String  @map("product_id") @db.Uuid
   quantity       Int
-  // Price SNAPSHOT at checkout: later price changes never change a past order.
-  unitPriceCents Int     @map("unit_price_cents")
+  // SNAPSHOT at checkout (from the catalog service): a past order never changes when a product is
+  // renamed, re-priced or deleted later - and showing an order never needs the catalog.
+  unitPriceCents  Int    @map("unit_price_cents")
+  productName     String @map("product_name")
+  productSku      String @map("product_sku")
+  productCategory String @map("product_category")
   order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product        Product @relation(fields: [productId], references: [id])
 
   @@index([orderId])
   @@map("order_items")

@@ -2,6 +2,7 @@
  * DATABASE PER SERVICE - create one database + one database user per service:   npm run db:create-service-dbs
  *
  *   identity     -> database scalecart_identity      user identity_svc
+ *   catalog      -> database scalecart_catalog       user catalog_svc
  *   order        -> database scalecart_order         user order_svc
  *   inventory    -> database scalecart_inventory     user inventory_svc
  *   payment      -> database scalecart_payment       user payment_svc
@@ -23,7 +24,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 
-export const SERVICE_DBS = ["identity", "order", "inventory", "payment", "notification"] as const;
+export const SERVICE_DBS = ["identity", "catalog", "order", "inventory", "payment", "notification"] as const;
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const adminUrl = process.env.ADMIN_DATABASE_URL;

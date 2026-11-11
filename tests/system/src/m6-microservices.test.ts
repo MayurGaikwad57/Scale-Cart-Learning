@@ -106,7 +106,8 @@ describe("API gateway", () => {
   it("admin > services shows every service, its routes, consumer groups and traffic", async () => {
     const res = await request(app).get("/admin/services").set(admin.auth).expect(200);
     const byName = Object.fromEntries(res.body.services.map((s: { service: string }) => [s.service, s]));
-    expect(Object.keys(byName).sort()).toEqual(["identity", "inventory", "notification", "order", "payment"]);
+    expect(Object.keys(byName).sort()).toEqual(["catalog", "identity", "inventory", "notification", "order", "payment"]);
+    expect(byName.catalog.routes).toEqual(expect.arrayContaining(["/products", "/admin/system"])); // M6.5 phase 5
     expect(byName.identity.routes).toEqual(["/auth"]); // M6.5: login moved out of the order service
     expect(byName.payment).toMatchObject({ up: true, status: "ready" });
     expect(byName.payment.groups.map((g: { group: string }) => g.group)).toEqual(["payment"]);
@@ -297,7 +298,7 @@ describe("code-review fixes (PR #4)", () => {
   /** An order row in PENDING, created directly (no checkout), for testing one step in isolation. */
   const pendingOrder = (u: U, productId: string, quantity: number, paymentMethod = "TEST_CARD_SUCCESS") =>
     orderDb.order.create({
-      data: { userId: u.user.id, totalCents: 1000 * quantity, paymentMethod, items: { create: [{ productId, quantity, unitPriceCents: 1000 }] } },
+      data: { userId: u.user.id, totalCents: 1000 * quantity, paymentMethod, items: { create: [{ productId, quantity, unitPriceCents: 1000, productName: "Test product", productSku: "TEST", productCategory: "test" }] } },
     });
   const reserveDirect = (orderId: string, productId: string, quantity: number) =>
     fetch(`${serviceUrls.inventory}/internal/reservations`, {

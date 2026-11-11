@@ -7,12 +7,13 @@ import { callService, ServiceCallError } from "@scalecart/service-kit/http-clien
 import { badRequest, conflict, HttpError, notFound } from "@scalecart/service-kit/errors";
 import { pageParams } from "@scalecart/service-kit/validation";
 import { PAYMENT_METHODS } from "@scalecart/events";
+import { getProducts } from "../../catalog.js";
 
 export const createOrderSchema = z.object({ paymentMethod: z.enum(PAYMENT_METHODS) });
 export const listOrdersQuery = z.object(pageParams);
 
 const orderInclude = {
-  items: { include: { product: { select: { name: true, sku: true, category: true } } }, orderBy: { id: "asc" } },
+  items: { orderBy: { id: "asc" } },
 } satisfies Prisma.OrderInclude;
 
 type OrderRow = Prisma.OrderGetPayload<{ include: typeof orderInclude }>;
@@ -25,9 +26,10 @@ export const toOrderDto = (o: OrderRow) => ({
   createdAt: o.createdAt,
   items: o.items.map((i) => ({
     productId: i.productId,
-    name: i.product.name,
-    sku: i.product.sku,
-    category: i.product.category,
+    // The SNAPSHOT taken at checkout - showing an order never needs the catalog service.
+    name: i.productName,
+    sku: i.productSku,
+    category: i.productCategory,
     quantity: i.quantity,
     unitPriceCents: i.unitPriceCents,
     lineTotalCents: i.unitPriceCents * i.quantity,
@@ -175,6 +177,16 @@ export const ordersService = {
 
   /** Step 1 of checkout: one local transaction in the order service's own tables. */
   async place(userId: string, paymentMethod: string, idem?: { key: string; fingerprint: string }) {
+    // M6.5: names and prices come from the CATALOG service. We ask BEFORE opening the transaction:
+    // never hold database locks while waiting for the network (a slow catalog would block every
+    // checkout of this cart and pile up locks). Inside, we only use what we fetched here.
+    const cartNow = await prisma.cartItem.findMany({ where: { cart: { userId } }, select: { productId: true } });
+    if (cartNow.length > MAX_ORDER_LINES) {
+      throw badRequest("too_many_items", `An order can contain at most ${MAX_ORDER_LINES} different products. Please split it into several orders.`);
+    }
+    const fetchedIds = new Set(cartNow.map((i) => i.productId));
+    const products = await getProducts([...fetchedIds]);
+
     return prisma.$transaction(
       async (tx) => {
         // Serialise checkouts of the same cart. A double-click's second request waits here, then
@@ -193,16 +205,19 @@ export const ordersService = {
           }
         }
 
-        const cart = await tx.cart.findUnique({ where: { userId }, include: { items: { include: { product: true } } } });
+        const cart = await tx.cart.findUnique({ where: { userId }, include: { items: true } });
         if (!cart || cart.items.length === 0) throw badRequest("cart_empty", "Your cart is empty");
         if (cart.items.length > MAX_ORDER_LINES) {
           throw badRequest("too_many_items", `An order can contain at most ${MAX_ORDER_LINES} different products. Please split it into several orders.`);
         }
-        const inactive = cart.items.find((i) => !i.product.active);
-        if (inactive) throw conflict("product_unavailable", `"${inactive.product.name}" is no longer available`);
+        // The cart changed between our catalog call and the lock (another tab added a product).
+        if (cart.items.some((i) => !fetchedIds.has(i.productId))) throw conflict("cart_changed", "Your cart just changed - please review it and try again.");
+        const lines = cart.items.map((i) => ({ ...i, product: products.get(i.productId) }));
+        const gone = lines.find((l) => !l.product || !l.product.active);
+        if (gone) throw conflict("product_unavailable", `"${gone.product?.name ?? "A product in your cart"}" is no longer available`);
 
-        // Price snapshot of every line. Stock is NOT touched here: it isn't ours any more.
-        const totalCents = cart.items.reduce((sum, i) => sum + i.product.priceCents * i.quantity, 0);
+        // SNAPSHOT of every line (price, name, sku, category). Stock is NOT touched here: it isn't ours.
+        const totalCents = lines.reduce((sum, l) => sum + l.product!.priceCents * l.quantity, 0);
         const order = await tx.order.create({
           data: {
             userId,
@@ -210,7 +225,16 @@ export const ordersService = {
             paymentMethod,
             idempotencyKey: idem?.key,
             idempotencyFingerprint: idem?.fingerprint,
-            items: { create: cart.items.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPriceCents: i.product.priceCents })) },
+            items: {
+              create: lines.map((l) => ({
+                productId: l.productId,
+                quantity: l.quantity,
+                unitPriceCents: l.product!.priceCents,
+                productName: l.product!.name,
+                productSku: l.product!.sku,
+                productCategory: l.product!.category,
+              })),
+            },
           },
         });
         // The cart becomes the order. If the order doesn't go ahead, restoreCart() puts it back.

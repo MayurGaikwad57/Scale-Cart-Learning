@@ -6,8 +6,9 @@
  * service's own connection string (apps/<service>/.env).
  *
  *   identity     users
- *   order        products (+ the stock COPY from inventory), cart, cart_items, orders,
- *                order_items, sales_daily, processed_events of the "order" / "analytics" groups
+ *   catalog      products (+ the stock COPY from inventory)
+ *   order        cart, cart_items, orders, order_items (+ a SNAPSHOT of each line's product),
+ *                sales_daily, processed_events of the "order" / "analytics" groups
  *   inventory    inventory, product_info (sku + name copied from products), stock_alerts,
  *                reservations, reservation_items, processed_events of the "inventory" group
  *   payment      payments
@@ -37,17 +38,25 @@ const serviceUrl = (svc: string) => {
 type Copy = { table: string; select: string; conflict: string };
 const PLAN: Record<string, Copy[]> = {
   identity: [{ table: "users", select: "SELECT * FROM users", conflict: "(id)" }],
-  order: [
+  catalog: [
     {
       table: "products",
       select: `SELECT p.*, COALESCE(i.available, 0) AS stock_available, COALESCE(i.version, -1) AS stock_version
                FROM products p LEFT JOIN inventory i ON i.product_id = p.id`,
       conflict: "(id)",
     },
+  ],
+  order: [
     { table: "cart", select: "SELECT * FROM cart", conflict: "(id)" },
     { table: "cart_items", select: "SELECT * FROM cart_items", conflict: "(id)" },
     { table: "orders", select: "SELECT * FROM orders", conflict: "(id)" },
-    { table: "order_items", select: "SELECT * FROM order_items", conflict: "(id)" },
+    {
+      table: "order_items",
+      select: `SELECT oi.*, COALESCE(p.name, '(unknown product)') AS product_name, COALESCE(p.sku, '') AS product_sku,
+                      COALESCE(p.category, '') AS product_category
+               FROM order_items oi LEFT JOIN products p ON p.id = oi.product_id`,
+      conflict: "(id)",
+    },
     { table: "sales_daily", select: "SELECT * FROM sales_daily", conflict: "(day)" },
     { table: "processed_events", select: "SELECT * FROM processed_events WHERE consumer_group IN ('order', 'analytics')", conflict: "(consumer_group, event_id)" },
   ],

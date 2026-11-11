@@ -15,7 +15,7 @@ import { consumers as orderConsumers } from "@scalecart/order/consumers";
 import { consumers as paymentConsumers } from "@scalecart/payment/consumers";
 
 /** Every service's consumer groups (in production each runs inside its own service process). */
-const ALL_CONSUMERS = [...orderConsumers, ...paymentConsumers, ...inventoryConsumers, ...notificationConsumers];
+const ALL_CONSUMERS = [...catalogConsumers, ...orderConsumers, ...paymentConsumers, ...inventoryConsumers, ...notificationConsumers];
 
 /** Start the given groups inside this test process. */
 export const startWorkers = (groups: readonly ConsumerGroup[] = CONSUMER_GROUPS, opts: { log?: boolean } = {}) =>
@@ -27,6 +27,8 @@ import { paymentSettings } from "@scalecart/payment/modules/payments/payments.se
 import { serviceUrls, type ServiceName } from "@scalecart/service-kit/registry";
 import { createGatewayApp } from "@scalecart/gateway/app";
 import { createIdentityApp } from "@scalecart/identity/app";
+import { createCatalogApp } from "@scalecart/catalog/app";
+import { consumers as catalogConsumers } from "@scalecart/catalog/consumers";
 import { createInventoryApp } from "@scalecart/inventory/app";
 import { createNotificationApp } from "@scalecart/notification/app";
 import { createOrderApp } from "@scalecart/order/app";
@@ -51,6 +53,7 @@ export interface Cluster {
 
 const factories: Record<ServiceName, () => Express> = {
   identity: createIdentityApp,
+  catalog: createCatalogApp,
   order: createOrderApp,
   payment: createPaymentApp,
   inventory: createInventoryApp,

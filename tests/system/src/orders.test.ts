@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { disconnectAll, inventoryDb, orderDb, paymentDb } from "./db.js";
+import { catalogDb, disconnectAll, inventoryDb, orderDb, paymentDb } from "./db.js";
 import { eventually, settle, startCluster, type Cluster } from "./test-cluster.js";
 import { cleanup, makeProduct, makeUser } from "./test-utils.js";
 
@@ -92,7 +92,7 @@ describe("checkout: happy path (asynchronous payment)", () => {
     expect(await paymentDb.payment.count({ where: { orderId: res.body.id } })).toBe(1);
 
     // Changing the price later must not rewrite history.
-    await orderDb.product.update({ where: { id: p.id }, data: { priceCents: 9999 } });
+    await catalogDb.product.update({ where: { id: p.id }, data: { priceCents: 9999 } });
     const again = await request(app).get(`/orders/${res.body.id}`).set(u.auth);
     expect(again.body.items[0].unitPriceCents).toBe(1200);
   });

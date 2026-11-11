@@ -11,7 +11,7 @@ runService({
   port: env.ORDER_PORT,
   app: createOrderApp(),
   db,
-  consumers, // "order" (payment results), "analytics", "product_stock"
+  consumers, // "order" (payment results), "analytics"
   onStart: startReconciler,
   onStop: stopReconciler,
 });

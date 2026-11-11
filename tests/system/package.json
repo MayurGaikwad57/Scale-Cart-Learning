@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@scalecart/catalog": "*",
     "@scalecart/events": "*",
     "@scalecart/gateway": "*",
     "@scalecart/identity": "*",

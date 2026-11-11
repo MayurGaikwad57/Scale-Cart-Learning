@@ -4,11 +4,12 @@ import pg from "pg";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { INVENTORY_TOPIC, makeEvent, TOPIC_PARTITIONS, type StockChanged } from "@scalecart/events";
-import { productStockHandler } from "@scalecart/order/product-stock.handler";
+import { productStockHandler } from "@scalecart/catalog/product-stock.handler";
 import { publish } from "@scalecart/service-kit/publisher";
-import { disconnectAll, inventoryDb, orderDb } from "./db.js";
+import { catalogDb, disconnectAll, inventoryDb } from "./db.js";
 import { eventually, startCluster, type Cluster } from "./test-cluster.js";
 import { cleanup, makeProduct, makeUser, RUN } from "./test-utils.js";
+import { settle } from "./test-cluster.js";
 
 /**
  * M6.5 phase 3 - DATABASE PER SERVICE. What changes when the services no longer share a database:
@@ -73,22 +74,22 @@ describe("data that was JOINed is now copied through events", () => {
   it("an admin stock change reaches the order service's copy (StockChanged with the number)", async () => {
     const p = await makeProduct(5);
     await request(app).post("/inventory").set(admin.auth).send({ productId: p.id, available: 11 }).expect(200);
-    await eventually(async () => (await orderDb.product.findUnique({ where: { id: p.id } }))?.stockAvailable === 11);
+    await eventually(async () => (await catalogDb.product.findUnique({ where: { id: p.id } }))?.stockAvailable === 11);
     expect((await request(app).get(`/products/${p.id}`)).body.stock).toBe(11);
   });
 
   it("an OLD StockChanged arriving late never overwrites a newer number (versioned copy)", async () => {
     const p = await makeProduct(5);
     await request(app).post("/inventory").set(admin.auth).send({ productId: p.id, available: 9 }).expect(200); // version 1
-    await eventually(async () => (await orderDb.product.findUnique({ where: { id: p.id } }))?.stockVersion === 1);
+    await eventually(async () => (await catalogDb.product.findUnique({ where: { id: p.id } }))?.stockVersion === 1);
     // A replayed / delayed event from BEFORE that change (version 0, available 5), handled directly:
     const stale = makeEvent<StockChanged>("StockChanged", 2, { productId: p.id, cause: "reservation", available: 5, version: 0 });
     expect(await productStockHandler(stale)).toBe("stale");
-    expect(await orderDb.product.findUnique({ where: { id: p.id } })).toMatchObject({ stockAvailable: 9, stockVersion: 1 });
+    expect(await catalogDb.product.findUnique({ where: { id: p.id } })).toMatchObject({ stockAvailable: 9, stockVersion: 1 });
     // ...and the same old event through the real broker: still ignored.
     await publish({ topic: INVENTORY_TOPIC, key: p.id, partitions: TOPIC_PARTITIONS, event: stale, mode: "must" });
     await new Promise((r) => setTimeout(r, 500));
-    expect((await orderDb.product.findUnique({ where: { id: p.id } }))?.stockAvailable).toBe(9);
+    expect((await catalogDb.product.findUnique({ where: { id: p.id } }))?.stockAvailable).toBe(9);
   });
 
   it("the admin Events page gets low-stock alerts by ASKING the inventory service", async () => {
@@ -106,5 +107,48 @@ describe("data that was JOINed is now copied through events", () => {
     } finally {
       await cluster.restart("inventory");
     }
+  });
+});
+
+describe("products live in the CATALOG service (phase 5)", () => {
+  const addToCart = (u: Awaited<ReturnType<typeof makeUser>>, productId: string, quantity = 1) =>
+    request(app).post("/cart/items").set(u.auth).send({ productId, quantity });
+
+  it("an order keeps a SNAPSHOT of its products: renaming one later doesn't change the order", async () => {
+    const p = await makeProduct(5, { name: "Original name", priceCents: 1234 });
+    const u = await makeUser();
+    await addToCart(u, p.id).expect(201);
+    const order = await request(app).post("/orders").set(u.auth).send({ paymentMethod: "TEST_CARD_SUCCESS" }).expect(201);
+    await settle(app, u.auth, order.body.id);
+    await request(app).put(`/products/${p.id}`).set(admin.auth).send({ name: "Renamed later", priceCents: 9999 }).expect(200);
+    const after = await request(app).get(`/orders/${order.body.id}`).set(u.auth).expect(200);
+    expect(after.body.items[0]).toMatchObject({ name: "Original name", unitPriceCents: 1234 });
+  });
+
+  it("checkout takes the CURRENT price from the catalog, not the price when the item was added", async () => {
+    const p = await makeProduct(5, { priceCents: 1000 });
+    const u = await makeUser();
+    await addToCart(u, p.id, 2).expect(201);
+    await request(app).put(`/products/${p.id}`).set(admin.auth).send({ priceCents: 1500 }).expect(200);
+    const order = await request(app).post("/orders").set(u.auth).send({ paymentMethod: "TEST_CARD_SUCCESS" }).expect(201);
+    expect(order.body.totalCents).toBe(3000);
+  });
+
+  it("catalog down: the cart still loads (degraded), checkout refuses with 503, the cart is kept", async () => {
+    const p = await makeProduct(5);
+    const u = await makeUser();
+    await addToCart(u, p.id).expect(201);
+    await cluster.stop("catalog");
+    try {
+      const cart = await request(app).get("/cart").set(u.auth).expect(200);
+      expect(cart.body.degraded).toBe("catalog_unavailable");
+      expect(cart.body.items[0]).toMatchObject({ productId: p.id, purchasable: false });
+      const res = await request(app).post("/orders").set(u.auth).send({ paymentMethod: "TEST_CARD_SUCCESS" });
+      expect(res.status).toBe(503);
+      expect(res.body.error).toBe("catalog_unavailable");
+    } finally {
+      await cluster.restart("catalog");
+    }
+    expect((await request(app).get("/cart").set(u.auth).expect(200)).body.items).toHaveLength(1);
   });
 });

@@ -78,8 +78,8 @@ export type PaymentFailed = EventEnvelope<"PaymentFailed", PaymentResultData>;
 
 /**
  * StockChanged (M6.5): the inventory service changed how much of a product can be sold.
- * Published on the "inventory" topic, key = productId. Whoever SHOWS stock (the product pages and
- * the cart - order service today, catalog service later) keeps its OWN COPY of the number and
+ * Published on the "inventory" topic, key = productId. Whoever SHOWS stock (the catalog service's
+ * product pages, which the cart also uses) keeps its OWN COPY of the number and
  * refreshes it from this event. A service never reads another service's database.
  *   v1: { productId, cause }                        (phase 2: "refresh your cache")
  *   v2: + available, version                        (phase 3: the number itself, for the copy)
@@ -96,7 +96,7 @@ export interface StockChangedData {
 export type StockChanged = EventEnvelope<"StockChanged", StockChangedData>;
 
 /**
- * Product events (M6.5), published by the service that OWNS products (order today, catalog later)
+ * Product events (M6.5), published by the service that OWNS products (the catalog service)
  * on the "products" topic, key = productId. The inventory service creates the product's stock row
  * from ProductCreated and keeps its own copy of sku/name (for low-stock alerts).
  */
@@ -164,7 +164,7 @@ export function outcomeOf(e: OrderEvent): { confirmed: boolean; reason: string |
  * Part of the contract (like an AsyncAPI document): the admin pages show it, and every service
  * wires ITS OWN groups to ITS OWN handlers. The handler code itself lives in the owning service.
  */
-export const SERVICES = ["order", "payment", "inventory", "notification"] as const;
+export const SERVICES = ["catalog", "order", "payment", "inventory", "notification"] as const;
 export type Service = (typeof SERVICES)[number];
 
 export const CONSUMER_GROUPS = ["payment", "order", "inventory", "notification", "analytics", "product_stock", "product_sync"] as const;
@@ -176,7 +176,7 @@ export const GROUPS: Record<ConsumerGroup, { topic: string; service: Service; de
   inventory: { topic: ORDERS_TOPIC, service: "inventory", description: "OrderConfirmed -> stock sold; OrderCancelled -> stock released; low-stock alerts" },
   notification: { topic: ORDERS_TOPIC, service: "notification", description: "OrderConfirmed / OrderCancelled -> the customer's notification bell" },
   analytics: { topic: ORDERS_TOPIC, service: "order", description: "OrderConfirmed / OrderCancelled -> daily sales projection" },
-  product_stock: { topic: INVENTORY_TOPIC, service: "order", description: "StockChanged -> our copy of the stock + refresh the cached product pages" },
+  product_stock: { topic: INVENTORY_TOPIC, service: "catalog", description: "StockChanged -> our copy of the stock + refresh the cached product pages" },
   product_sync: { topic: PRODUCTS_TOPIC, service: "inventory", description: "ProductCreated -> create the stock row; ProductCreated / ProductUpdated -> our copy of sku + name" },
 };
 
