@@ -13,20 +13,28 @@
   "scripts": {
     "dev": "tsx watch --conditions=development src/main.ts",
     "start": "node dist/main.js",
-    "build": "tsc -b",
+    "build": "prisma generate && tsc -b",
     "typecheck": "tsc -b",
-    "worker": "tsx --conditions=development src/worker.ts"
+    "worker": "tsx --conditions=development src/worker.ts",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^7.10.0",
     "@scalecart/events": "*",
-    "@scalecart/legacy-db": "*",
     "@scalecart/service-kit": "*",
+    "dotenv": "^18.0.5",
     "express": "^5.2.1",
+    "pg": "^8.23.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.3",
+    "@types/pg": "^8.23.1",
+    "prisma": "^7.10.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }

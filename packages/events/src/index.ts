@@ -22,6 +22,7 @@ import { createHash, randomUUID } from "node:crypto";
 export const ORDERS_TOPIC = "orders";
 export const PAYMENTS_TOPIC = "payments";
 export const INVENTORY_TOPIC = "inventory";
+export const PRODUCTS_TOPIC = "products";
 export const TOPIC_PARTITIONS = 3;
 
 export interface EventEnvelope<TType extends string, TData> {
@@ -76,23 +77,48 @@ export type PaymentSucceeded = EventEnvelope<"PaymentSucceeded", PaymentResultDa
 export type PaymentFailed = EventEnvelope<"PaymentFailed", PaymentResultData>;
 
 /**
- * StockChanged (M6.5): the inventory service changed how much of some products can be sold.
- * Published on the "inventory" topic, key = productId. Whoever shows stock (the product pages,
- * owned by the order service today, by the catalog service later) refreshes its own copy / cache.
- * Before M6.5 the inventory service reached into the order service's cache code instead - a
- * service must never import another service's code.
+ * StockChanged (M6.5): the inventory service changed how much of a product can be sold.
+ * Published on the "inventory" topic, key = productId. Whoever SHOWS stock (the product pages and
+ * the cart - order service today, catalog service later) keeps its OWN COPY of the number and
+ * refreshes it from this event. A service never reads another service's database.
+ *   v1: { productId, cause }                        (phase 2: "refresh your cache")
+ *   v2: + available, version                        (phase 3: the number itself, for the copy)
+ * `version` is the inventory row's version: apply an event only if it is NEWER than what you have,
+ * so a late, older event can never overwrite a newer number.
  */
 export interface StockChangedData {
   productId: string;
-  /** reservation = an order reserved/released stock; admin = an admin set the stock level. */
-  cause: "reservation" | "admin";
+  /** reservation = an order reserved/released stock; admin = an admin set it; created = new product. */
+  cause: "reservation" | "admin" | "created";
+  available?: number; // v2
+  version?: number; // v2
 }
 export type StockChanged = EventEnvelope<"StockChanged", StockChangedData>;
+
+/**
+ * Product events (M6.5), published by the service that OWNS products (order today, catalog later)
+ * on the "products" topic, key = productId. The inventory service creates the product's stock row
+ * from ProductCreated and keeps its own copy of sku/name (for low-stock alerts).
+ */
+export interface ProductCreatedData {
+  productId: string;
+  sku: string;
+  name: string;
+  initialStock: number;
+}
+export type ProductCreated = EventEnvelope<"ProductCreated", ProductCreatedData>;
+export interface ProductUpdatedData {
+  productId: string;
+  sku: string;
+  name: string;
+}
+export type ProductUpdated = EventEnvelope<"ProductUpdated", ProductUpdatedData>;
 
 export type OrderEvent = OrderCreated | OrderConfirmed | OrderCancelled;
 export type PaymentEvent = PaymentSucceeded | PaymentFailed;
 export type InventoryEvent = StockChanged;
-export type AnyEvent = OrderEvent | PaymentEvent | InventoryEvent;
+export type ProductEvent = ProductCreated | ProductUpdated;
+export type AnyEvent = OrderEvent | PaymentEvent | InventoryEvent | ProductEvent;
 
 /**
  * DETERMINISTIC EVENT IDS. "Order X was confirmed" is ONE fact, however many times we publish it.
@@ -141,7 +167,7 @@ export function outcomeOf(e: OrderEvent): { confirmed: boolean; reason: string |
 export const SERVICES = ["order", "payment", "inventory", "notification"] as const;
 export type Service = (typeof SERVICES)[number];
 
-export const CONSUMER_GROUPS = ["payment", "order", "inventory", "notification", "analytics", "product_cache"] as const;
+export const CONSUMER_GROUPS = ["payment", "order", "inventory", "notification", "analytics", "product_stock", "product_sync"] as const;
 export type ConsumerGroup = (typeof CONSUMER_GROUPS)[number];
 
 export const GROUPS: Record<ConsumerGroup, { topic: string; service: Service; description: string }> = {
@@ -150,7 +176,8 @@ export const GROUPS: Record<ConsumerGroup, { topic: string; service: Service; de
   inventory: { topic: ORDERS_TOPIC, service: "inventory", description: "OrderConfirmed -> stock sold; OrderCancelled -> stock released; low-stock alerts" },
   notification: { topic: ORDERS_TOPIC, service: "notification", description: "OrderConfirmed / OrderCancelled -> the customer's notification bell" },
   analytics: { topic: ORDERS_TOPIC, service: "order", description: "OrderConfirmed / OrderCancelled -> daily sales projection" },
-  "product_cache": { topic: INVENTORY_TOPIC, service: "order", description: "StockChanged -> refresh the cached product pages that show stock" },
+  product_stock: { topic: INVENTORY_TOPIC, service: "order", description: "StockChanged -> our copy of the stock + refresh the cached product pages" },
+  product_sync: { topic: PRODUCTS_TOPIC, service: "inventory", description: "ProductCreated -> create the stock row; ProductCreated / ProductUpdated -> our copy of sku + name" },
 };
 
 export const groupsOfService = (service: Service) => CONSUMER_GROUPS.filter((g) => GROUPS[g].service === service);

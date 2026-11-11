@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { deterministicEventId, makeEvent, type ProductCreated, type ProductUpdated } from "@scalecart/events";
+import { publishProductEvent } from "../../events/publish.js";
 import { cached, countBypass, type Cached } from "@scalecart/service-kit/cache";
 import { conflict, notFound } from "@scalecart/service-kit/errors";
 import {
@@ -15,10 +18,10 @@ import type { CreateProductInput, ListQuery, UpdateProductInput } from "./produc
 
 type ProductRow = NonNullable<Awaited<ReturnType<typeof productsRepository.findById>>>;
 
-// The shape the API returns (inventory flattened into "stock").
-export const toProductDto = ({ inventory, ...p }: ProductRow) => ({
+// The shape the API returns. "stock" is OUR COPY of the inventory service's number (StockChanged).
+export const toProductDto = ({ stockAvailable, stockVersion: _version, ...p }: ProductRow) => ({
   ...p,
-  stock: inventory?.available ?? 0,
+  stock: stockAvailable,
 });
 export type ProductDto = ReturnType<typeof toProductDto>;
 
@@ -76,6 +79,10 @@ export const productsService = {
     try {
       const product = toProductDto(await productsRepository.create(input));
       await invalidateProducts([product.id], { catalog: true }); // must appear in lists/categories
+      // The inventory service creates the stock row from this event (it can't share our transaction).
+      await publishProductEvent(
+        makeEvent<ProductCreated>("ProductCreated", 1, { productId: product.id, sku: product.sku, name: product.name, initialStock: input.stock }, deterministicEventId("ProductCreated", product.id)),
+      );
       return product;
     } catch (err) {
       if (isCode(err, "P2002")) throw conflict("sku_taken");
@@ -94,6 +101,9 @@ export const productsService = {
     }
     // Database first, cache second (see products.cache.ts).
     await invalidateProducts([id], { catalog: true });
+    if (input.name !== undefined || input.sku !== undefined) {
+      await publishProductEvent(makeEvent<ProductUpdated>("ProductUpdated", 1, { productId: id, sku: product.sku, name: product.name }, randomUUID()));
+    }
     return product;
   },
 

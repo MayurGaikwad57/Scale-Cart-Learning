@@ -1,8 +1,6 @@
-import { Prisma } from "@scalecart/legacy-db";
+import { Prisma } from "../../generated/prisma/client.js";
 import { prisma } from "../../config/prisma.js";
 import type { CreateProductInput, ListQuery, UpdateProductInput } from "./products.validation.js";
-
-const withStock = { inventory: { select: { available: true } } } as const;
 
 const orderBy = (sort: ListQuery["sort"]): Prisma.ProductOrderByWithRelationInput[] => {
   switch (sort) {
@@ -48,14 +46,13 @@ export const productsRepository = {
         orderBy: orderBy(q.sort),
         skip: (q.page - 1) * q.pageSize,
         take: q.pageSize,
-        include: withStock,
       }),
       prisma.product.count({ where: w }),
     ]);
     return { items, total };
   },
 
-  findById: (id: string) => prisma.product.findUnique({ where: { id }, include: withStock }),
+  findById: (id: string) => prisma.product.findUnique({ where: { id } }),
 
   async categories() {
     const rows = await prisma.product.findMany({
@@ -67,13 +64,9 @@ export const productsRepository = {
     return rows.map((r) => r.category);
   },
 
-  // Product + its inventory row are created together, so every product always has stock info.
-  create: ({ stock, ...data }: CreateProductInput) =>
-    prisma.product.create({
-      data: { ...data, inventory: { create: { available: stock } } },
-      include: withStock,
-    }),
+  // M6.5: the stock row lives in the INVENTORY service's database. We store the initial stock as OUR
+  // copy and announce the product (ProductCreated) - the inventory service creates its row from it.
+  create: ({ stock, ...data }: CreateProductInput) => prisma.product.create({ data: { ...data, stockAvailable: stock } }),
 
-  update: (id: string, data: UpdateProductInput) =>
-    prisma.product.update({ where: { id }, data, include: withStock }),
+  update: (id: string, data: UpdateProductInput) => prisma.product.update({ where: { id }, data }),
 };

@@ -1,0 +1,150 @@
+// ORDER SERVICE database (scalecart_order) - only the tables the order service OWNS.
+// No other service can connect to this database (own DB user, CONNECT revoked from everyone else).
+// Users and products still live here until the identity and catalog services are extracted.
+// Money is stored as integer cents. IDs are UUIDs.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  CUSTOMER
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         Role     @default(CUSTOMER)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  cart   Cart?
+  orders Order[]
+
+  @@map("users")
+}
+
+model Product {
+  id          String   @id @default(uuid()) @db.Uuid
+  sku         String   @unique
+  name        String
+  description String   @default("")
+  priceCents  Int      @map("price_cents")
+  category    String
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  // M6.5: OUR COPY of the stock (the inventory service owns the real number in ITS database).
+  // Kept up to date by StockChanged events; stockVersion = the inventory row's version, so an
+  // older event arriving late can never overwrite a newer number. Shown on product pages and the
+  // cart; the checkout still asks the inventory service (the source of truth) to reserve.
+  stockAvailable Int @default(0) @map("stock_available")
+  stockVersion   Int @default(-1) @map("stock_version")
+
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+
+  // Serves the catalog filter (category) + price sort/range.
+  @@index([category, priceCents])
+  @@map("products")
+}
+
+model Cart {
+  id     String     @id @default(uuid()) @db.Uuid
+  userId String     @unique @map("user_id") @db.Uuid
+  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items  CartItem[]
+
+  @@map("cart")
+}
+
+model CartItem {
+  id        String  @id @default(uuid()) @db.Uuid
+  cartId    String  @map("cart_id") @db.Uuid
+  productId String  @map("product_id") @db.Uuid
+  quantity  Int
+  cart      Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id])
+
+  @@unique([cartId, productId])
+  @@map("cart_items")
+}
+
+model Order {
+  id                     String        @id @default(uuid()) @db.Uuid
+  userId                 String        @map("user_id") @db.Uuid
+  status                 OrderStatus   @default(PENDING)
+  totalCents             Int           @map("total_cents")
+  // Idempotent order creation. Unique per user so keys can't collide across users.
+  idempotencyKey         String?       @map("idempotency_key")
+  // SHA-256 of the request body that used the key: same key + DIFFERENT body = client bug (422).
+  idempotencyFingerprint String?       @map("idempotency_fingerprint")
+  // The ORDER SERVICE's own copy of what it knows about the payment, learned from the
+  // PaymentSucceeded / PaymentFailed events (the payments table is in the payment service's DB).
+  paymentMethod          String?       @map("payment_method")
+  paymentStatus          PaymentStatus @default(PENDING) @map("payment_status")
+  // Why a CANCELLED order was cancelled: payment_declined | inventory_unavailable | reservation_released
+  statusReason           String?       @map("status_reason")
+  createdAt              DateTime      @default(now()) @map("created_at")
+
+  user  User        @relation(fields: [userId], references: [id])
+  items OrderItem[]
+
+  @@unique([userId, idempotencyKey])
+  // Serves order history: newest orders for a user.
+  @@index([userId, createdAt(sort: Desc)])
+  // The reconciler's query "PENDING orders older than N seconds".
+  @@index([status, createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id             String  @id @default(uuid()) @db.Uuid
+  orderId        String  @map("order_id") @db.Uuid
+  productId      String  @map("product_id") @db.Uuid
+  quantity       Int
+  // Price SNAPSHOT at checkout: later price changes never change a past order.
+  unitPriceCents Int     @map("unit_price_cents")
+  order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product        Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+// Idempotent consumers ("order" and "analytics" groups): one row per (group, event) processed.
+model ProcessedEvent {
+  consumerGroup String   @map("consumer_group")
+  eventId       String   @map("event_id") @db.Uuid
+  processedAt   DateTime @default(now()) @map("processed_at")
+
+  @@id([consumerGroup, eventId])
+  @@map("processed_events")
+}
+
+// READ MODEL built by the "analytics" consumer from order events.
+model SalesDaily {
+  day             DateTime @id @db.Date
+  confirmedOrders Int      @default(0) @map("confirmed_orders")
+  cancelledOrders Int      @default(0) @map("cancelled_orders")
+  revenueCents    BigInt   @default(0) @map("revenue_cents")
+
+  @@map("sales_daily")
+}

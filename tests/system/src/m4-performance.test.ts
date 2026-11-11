@@ -3,7 +3,7 @@ import type { Express } from "express";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { kv } from "@scalecart/service-kit/kv";
-import { prisma } from "@scalecart/order/config/prisma";
+import { disconnectAll, inventoryDb, orderDb } from "./db.js";
 import { startKvServer, type RunningKvServer } from "@scalecart/scalekv/server";
 import { settle, startCluster, eventually, type Cluster } from "./test-cluster.js";
 import { cleanup, makeProduct, makeUser, RUN } from "./test-utils.js";
@@ -30,7 +30,7 @@ afterAll(async () => {
   await kv.disconnect();
   await server.close();
   await cleanup();
-  await prisma.$disconnect();
+  await disconnectAll();
 });
 
 const flush = () => server.store.execute(["FLUSHALL"]);
@@ -42,7 +42,7 @@ const placeOrder = (u: U, key?: string, paymentMethod = "TEST_CARD_SUCCESS") =>
     .post("/orders")
     .set({ ...u.auth, ...(key ? { "Idempotency-Key": key } : {}) })
     .send({ paymentMethod });
-const ordersWithKey = (u: U, key: string) => prisma.order.count({ where: { userId: u.user.id, idempotencyKey: key } });
+const ordersWithKey = (u: U, key: string) => orderDb.order.count({ where: { userId: u.user.id, idempotencyKey: key } });
 
 describe("cache-aside: product detail", () => {
   it("MISS first, HIT after; an admin edit invalidates it", async () => {
@@ -237,7 +237,7 @@ describe("idempotent order creation", () => {
     expect(retry.headers["idempotent-replayed"]).toBe("true");
     expect(retry.body.id).toBe(first.body.id); // ...the retry is the same order, not a new one
     expect(await ordersWithKey(u, key)).toBe(1);
-    expect((await prisma.inventory.findUniqueOrThrow({ where: { productId: p.id } })).available).toBe(8);
+    expect((await inventoryDb.inventory.findUniqueOrThrow({ where: { productId: p.id } })).available).toBe(8);
   });
 
   it("rejects the same key with a different request body (422)", async () => {

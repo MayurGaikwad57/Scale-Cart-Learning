@@ -9,6 +9,9 @@ import { CONSUMER_GROUPS, dlqTopicOf, GROUPS, type ConsumerGroup } from "@scalec
 import { authenticate, requireRole } from "@scalecart/service-kit/auth";
 import { validateBody } from "@scalecart/service-kit/validate";
 import { HttpError } from "@scalecart/service-kit/errors";
+import { callService } from "@scalecart/service-kit/http-client";
+
+type StockAlertDto = { productId: string; name: string; sku: string; available: number; updatedAt: string };
 
 /** Admin > Events: look inside ScaleLog, flip the chaos switch, inspect and replay the DLQ. */
 export const eventsRouter = Router();
@@ -107,16 +110,17 @@ eventsRouter.post("/dlq/:group/replay", async (req, res) => {
 
 /** What the consumers built: the analytics projection and the low-stock alerts. */
 eventsRouter.get("/projections", async (_req, res) => {
+  // Sales: OUR read model. Stock alerts: owned by the inventory service, so we ASK it (M6.5 - before,
+  // this read its table in the shared database). If it is down, the page still shows the sales.
   const [sales, alerts] = await Promise.all([
     prisma.salesDaily.findMany({ orderBy: { day: "desc" }, take: 14 }),
-    prisma.stockAlert.findMany({
-      orderBy: { available: "asc" },
-      include: { product: { select: { name: true, sku: true } } },
-    }),
+    callService<StockAlertDto[]>("inventory", "GET", "/internal/stock-alerts", undefined, { timeoutMs: 1500 })
+      .then((r) => (r.status === 200 ? r.body : []))
+      .catch(() => [] as StockAlertDto[]),
   ]);
   res.json({
     // revenueCents is a BigInt in the DB; JSON has no BigInt (Number is exact up to 2^53 cents).
     sales: sales.map((s) => ({ ...s, day: s.day.toISOString().slice(0, 10), revenueCents: Number(s.revenueCents) })),
-    stockAlerts: alerts.map((a) => ({ productId: a.productId, name: a.product.name, sku: a.product.sku, available: a.available, updatedAt: a.updatedAt })),
+    stockAlerts: alerts,
   });
 });

@@ -11,12 +11,13 @@ See `project-plan.md` for the roadmap and `docs/` for design decisions.
 - `packages/service-kit` the **microservice chassis** every service shares: Express skeleton, health checks, request ids,
   errors, auth, service calls, ScaleKV/ScaleLog clients, consumer runtime.
 - `packages/events` the **event contracts** between services: topics, event types, who consumes what.
-- `packages/legacy-db` **temporary**: the one database the services still share (M6.5 phase 3 gives each its own).
 - `tests/system` the **system tests**: the whole system in one test process (the only place allowed to import several apps).
 - `frontend/` Angular 21 (standalone, signals) + Bootstrap
 
-It is an **npm workspaces monorepo**. The rule that makes the services real microservices: **an app never imports
-another app** (`npm run check:boundaries` enforces it) - services talk only over HTTP and events.
+It is an **npm workspaces monorepo**. The two rules that make the services real microservices:
+**an app never imports another app** (`npm run check:boundaries` enforces it), and **every service has its own
+database** (`scalecart_order`, `scalecart_inventory`, `scalecart_payment`, `scalecart_notification`), reachable only
+with that service's own database user. Services talk only over HTTP and events.
 M6.5 progress and design: `docs/09-real-microservices.md`.
 
 ## Run locally
@@ -26,10 +27,12 @@ M6.5 progress and design: `docs/09-real-microservices.md`.
    ```
    npm install                 # ONCE, at the repo root: installs and links every workspace
    # each service has its own settings: copy apps/<name>/.env.example to apps/<name>/.env
-   # (gateway, order, payment, inventory, notification) and set DATABASE_URL in packages/legacy-db/.env
-   npm run db:deploy           # create the tables
-   npm run seed                # admin account + 14 sample products
+   # (gateway, order, payment, inventory, notification), and .env.example to .env (ADMIN_DATABASE_URL)
+   npm run db:create-service-dbs   # one database + one DB user per service; writes each URL into that app's .env
+   npm run db:deploy           # create each service's tables in its own database
+   npm run db:generate         # each service's Prisma client
    npm run dev                 # starts EVERYTHING: ScaleKV, ScaleLog, the 4 services and the gateway
+   npm run seed                # (in a 2nd terminal, while dev runs) admin account + 14 sample products
    ```
    `npm run dev` prefixes every log line with the process name and starts every app in its own folder (so it reads
    its own `.env`, like a container). To play with failures, run the pieces in separate terminals instead:

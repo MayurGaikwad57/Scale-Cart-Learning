@@ -1,0 +1,32 @@
+// PAYMENT SERVICE database (scalecart_payment) - only the tables the payment service OWNS.
+// orderId is a plain id (the orders table is in the order service's database).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+model Payment {
+  id          String        @id @default(uuid()) @db.Uuid
+  orderId     String        @map("order_id") @db.Uuid
+  amountCents Int           @map("amount_cents")
+  status      PaymentStatus @default(PENDING)
+  providerRef String?       @map("provider_ref")
+  method      String?
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  // ONE payment per order. The payment service can receive the same OrderCreated more than once
+  // (at-least-once delivery, re-publishing); this constraint makes a double charge impossible.
+  @@unique([orderId])
+  @@map("payments")
+}

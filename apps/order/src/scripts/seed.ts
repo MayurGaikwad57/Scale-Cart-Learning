@@ -1,7 +1,15 @@
 // Development seed: one admin account + sample products. Safe to run repeatedly (upserts by email / sku).
-//   npm run seed
+//   npm run seed        (with ScaleLog running: npm run dev)
+//
+// M6.5: products live in the ORDER service's database, their stock in the INVENTORY service's. The
+// seed creates the products here and publishes ProductCreated for each NEW one; the inventory
+// service creates the stock rows from those events (it is the only one that writes its database).
+import { deterministicEventId, makeEvent, type ProductCreated } from "@scalecart/events";
+import { broker } from "@scalecart/service-kit/broker";
 import bcrypt from "bcryptjs";
+import { env } from "../config/env.js";
 import { prisma } from "../config/prisma.js";
+import { publishProductEvent } from "../events/publish.js";
 
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL ?? "admin@scalecart.com").toLowerCase();
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "Admin@12345";
@@ -31,15 +39,31 @@ async function main() {
     update: { role: "ADMIN" },
   });
 
+  if (!env.LOG_URL) throw new Error("LOG_URL is not set: the seed announces new products to the inventory service through ScaleLog");
+  broker.conn.connect(env.LOG_URL);
+  await broker.conn.waitUntilReady(5000).catch(() => {
+    throw new Error("ScaleLog is not running - start everything with `npm run dev` first, then run the seed");
+  });
+
+  let created = 0;
   for (const [sku, name, description, priceCents, category, stock] of products) {
-    await prisma.product.upsert({
-      where: { sku },
-      // Stock is only set on first creation, so re-seeding never resets stock you've changed.
-      create: { sku, name, description, priceCents, category, inventory: { create: { available: stock } } },
-      update: { name, description, priceCents, category },
-    });
+    const existing = await prisma.product.findUnique({ where: { sku } });
+    // Stock is only set on first creation, so re-seeding never resets stock you've changed.
+    const p = existing
+      ? await prisma.product.update({ where: { sku }, data: { name, description, priceCents, category } })
+      : await prisma.product.create({ data: { sku, name, description, priceCents, category, stockAvailable: stock } });
+    if (!existing) {
+      created++;
+      const ok = await publishProductEvent(
+        makeEvent<ProductCreated>("ProductCreated", 1, { productId: p.id, sku, name, initialStock: stock }, deterministicEventId("ProductCreated", p.id)),
+      );
+      if (!ok) throw new Error(`could not announce ${sku} to the inventory service (ScaleLog down?)`);
+    }
   }
-  console.log(`Seeded admin ${ADMIN_EMAIL} and ${products.length} products.`);
+  console.log(`Seeded admin ${ADMIN_EMAIL} and ${products.length} products (${created} new, announced to the inventory service).`);
 }
 
-main().finally(() => prisma.$disconnect());
+main().finally(async () => {
+  await broker.conn.disconnect();
+  await prisma.$disconnect();
+});

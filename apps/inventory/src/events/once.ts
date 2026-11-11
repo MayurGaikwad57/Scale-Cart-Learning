@@ -1,4 +1,4 @@
-import { Prisma } from "@scalecart/legacy-db";
+import { Prisma } from "../generated/prisma/client.js";
 import { prisma } from "../config/prisma.js";
 
 /**

@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { prisma } from "@scalecart/order/config/prisma";
+import { disconnectAll, inventoryDb, orderDb, paymentDb } from "./db.js";
 import { eventually, settle, startCluster, type Cluster } from "./test-cluster.js";
 import { cleanup, makeProduct, makeUser } from "./test-utils.js";
 
@@ -18,14 +18,14 @@ afterAll(async () => {
     await cluster.close();
   } finally {
     await cleanup();
-    await prisma.$disconnect();
+    await disconnectAll();
   }
 });
 
 type U = Awaited<ReturnType<typeof makeUser>>;
 const addToCart = (u: U, productId: string, quantity = 1) => request(app).post("/cart/items").set(u.auth).send({ productId, quantity });
 const checkout = (u: U, paymentMethod = "TEST_CARD_SUCCESS") => request(app).post("/orders").set(u.auth).send({ paymentMethod });
-const stock = (productId: string) => prisma.inventory.findUniqueOrThrow({ where: { productId } });
+const stock = (productId: string) => inventoryDb.inventory.findUniqueOrThrow({ where: { productId } });
 /** Wait until the asynchronous consumers brought the stock to the expected numbers. */
 const stockBecomes = (productId: string, want: { available: number; reserved: number }) =>
   eventually(async () => {
@@ -89,10 +89,10 @@ describe("checkout: happy path (asynchronous payment)", () => {
     expect(final.status).toBe("CONFIRMED");
     expect(final.payment).toEqual({ status: "SUCCEEDED", amountCents: 2400 });
     await stockBecomes(p.id, { available: 3, reserved: 0 }); // inventory service committed the reservation
-    expect(await prisma.payment.count({ where: { orderId: res.body.id } })).toBe(1);
+    expect(await paymentDb.payment.count({ where: { orderId: res.body.id } })).toBe(1);
 
     // Changing the price later must not rewrite history.
-    await prisma.product.update({ where: { id: p.id }, data: { priceCents: 9999 } });
+    await orderDb.product.update({ where: { id: p.id }, data: { priceCents: 9999 } });
     const again = await request(app).get(`/orders/${res.body.id}`).set(u.auth);
     expect(again.body.items[0].unitPriceCents).toBe(1200);
   });
@@ -153,7 +153,7 @@ describe("checkout: concurrency (row locks, now inside the inventory service)", 
     expect(loser.body.error).toBe("insufficient_stock");
     expect(loser.body.message).toContain("out of stock"); // the order service added the product name
     await stockBecomes(p.id, { available: 0, reserved: 0 });
-    expect(await prisma.orderItem.count({ where: { productId: p.id } })).toBe(1); // the loser's order was undone
+    expect(await orderDb.orderItem.count({ where: { productId: p.id } })).toBe(1); // the loser's order was undone
   });
 
   it("10 buyers, 3 items: exactly 3 orders succeed", async () => {
@@ -188,7 +188,7 @@ describe("checkout: concurrency (row locks, now inside the inventory service)", 
     await addToCart(u, p.id, 2);
     const results = await Promise.all([checkout(u), checkout(u)]);
     expect(results.map((r) => r.status).sort()).toEqual([201, 400]);
-    expect(await prisma.order.count({ where: { userId: u.user.id } })).toBe(1);
+    expect(await orderDb.order.count({ where: { userId: u.user.id } })).toBe(1);
     await stockBecomes(p.id, { available: 8, reserved: 0 });
   });
 
@@ -198,12 +198,12 @@ describe("checkout: concurrency (row locks, now inside the inventory service)", 
     const scarce = await makeProduct(5);
     await addToCart(u, plenty.id, 2);
     await addToCart(u, scarce.id, 5);
-    await prisma.inventory.update({ where: { productId: scarce.id }, data: { available: 1 } }); // someone else bought it
+    await inventoryDb.inventory.update({ where: { productId: scarce.id }, data: { available: 1 } }); // someone else bought it
     const res = await checkout(u);
     expect(res.status).toBe(409);
     expect(res.body.message).toContain("Only 1 left");
     expect(await stock(plenty.id)).toMatchObject({ available: 10, reserved: 0 });
-    expect(await prisma.order.count({ where: { userId: u.user.id } })).toBe(0);
+    expect(await orderDb.order.count({ where: { userId: u.user.id } })).toBe(0);
     expect((await request(app).get("/cart").set(u.auth)).body.itemCount).toBe(7);
   });
 });

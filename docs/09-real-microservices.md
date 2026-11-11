@@ -67,7 +67,7 @@ while coding) and as compiled JavaScript in production (`tsc -b` builds them fir
 |---|---|---|
 | 1 | **Workspaces + shared packages** — root workspaces, `packages/service-kit`, `packages/events`; the chassis no longer knows Prisma or any service's consumer groups (they are passed in). No behaviour change. | ✅ all tests pass, `npm run dev` and compiled `npm start` work |
 | 2 | **One app per service** — `apps/<name>` with own `package.json`, env schema, scripts; owned modules move in; event handlers split per app; lint rule "no app imports another app" | ✅ see "Phase 2 — what changed" below |
-| 3 | **Database per service** — 4 databases + 4 DB users, own Prisma schema + migrations per app, no cross-DB foreign keys, own `processed_events`, `/internal/stock-alerts`, one-time data migration script (old DB kept as a backup) | each service can only reach its own DB; browser checkout works |
+| 3 | **Database per service** — 4 databases + 4 DB users, own Prisma schema + migrations per app, no cross-DB foreign keys, own `processed_events`, `/internal/stock-alerts`, one-time data migration script (old DB kept as a backup) | ✅ see "Phase 3 — what changed" below |
 | 4 | **Identity service** — users/auth out of order, own DB, RS256 + JWKS, gateway routes `/auth` → identity | login/register work; only identity holds the signing key |
 | 5 | **Catalog service** — products out of order, own DB, `ProductCreated/Updated` + `StockChanged` events, stock copy, cart/checkout call catalog, gateway routes `/products` → catalog | catalog, cart, checkout, admin product CRUD work end to end |
 | 6 | **Deploy per service** — Dockerfile per app, `docker-compose.yml`, GitHub Actions per app | CI green for every app |
@@ -91,7 +91,31 @@ while coding) and as compiled JavaScript in production (`tsc -b` builds them fir
   connections in total, so replicas x pool size summed over all services must stay below that. The system tests run
   every service in one process, so they use small pools and at most 3 test files at once.
 - `tests/system`: the whole-system tests, the only package allowed to import several apps.
-- Still shared (on purpose, until phase 3): the database, through the **temporary** `packages/legacy-db`.
+- Still shared in phase 2 (removed in phase 3): the database, through a temporary `packages/legacy-db`.
+
+## Phase 3 — what changed
+
+- **4 databases, 4 database users** (`npm run db:create-service-dbs`, `tools/create-service-dbs.ts`):
+  `scalecart_order` / `order_svc`, `scalecart_inventory` / `inventory_svc`, `scalecart_payment` / `payment_svc`,
+  `scalecart_notification` / `notification_svc`. Each user owns its database; `CONNECT` is revoked from everyone
+  else, so `payment_svc` gets *permission denied for database "scalecart_order"* (a system test proves it).
+  The services no longer connect as the `postgres` superuser.
+- **Each app owns its schema**: `apps/<name>/prisma/schema.prisma`, its own migrations (`0_init`), its own generated
+  client (`src/generated`), its own connection string with a service-specific name (`ORDER_DATABASE_URL`, ...).
+  The only foreign keys left are *inside* one service (e.g. reservation_items -> reservations).
+- **Joins became copies, kept up to date by events:**
+  - product pages and the cart showed stock by joining `inventory` -> the order service keeps its own
+    `products.stock_available` (+ `stock_version`), updated by **StockChanged v2** (now carries `available` and the
+    row `version`; an older event is ignored: *versioned update*). The checkout still asks the inventory service.
+  - a new product + its stock row were ONE transaction -> the order service publishes **ProductCreated**
+    (topic `products`); the inventory service's new **product_sync** group creates the stock row and keeps its own
+    `product_info` (sku, name) - also updated by **ProductUpdated**.
+  - stock alerts were joined with product names -> the inventory service answers `GET /internal/stock-alerts`
+    with its own copy of the names; the order service's admin page asks it (and still works without it).
+  - `processed_events`: one table per consumer, in that consumer's database.
+- **Data migration** (`npm run db:migrate-legacy-data`): copied every row from the old shared database to its owner
+  (row counts compared). The old database `scale_cart` was **not** changed and stays as a backup.
+- `packages/legacy-db` deleted. New system tests: `tests/system/src/m65-service-databases.test.ts`.
 
 ## Known gaps (on purpose)
 

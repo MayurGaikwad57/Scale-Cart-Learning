@@ -1,4 +1,4 @@
-import { db } from "./config/prisma.js";
+import { db, prisma } from "./config/prisma.js";
 import { Router } from "express";
 import { z } from "zod";
 import { inventoryRouter } from "./modules/inventory/inventory.routes.js";
@@ -13,6 +13,7 @@ import { InsufficientStockError, ReservationReleasedError, reservations, reserve
  *   internal POST /internal/reservations             reserve (called by the order service)
  *            POST /internal/reservations/:id/release give back (compensation)
  *            GET  /internal/reservations/:id         inspect
+ *            GET  /internal/stock-alerts             low-stock alerts (the order service's admin page)
  * Commit / release on the order's outcome arrive as EVENTS (inventory.handler.ts).
  *
  * WHY ITS OWN SERVICE: stock is the most CONTENDED data in the shop (every buyer of a hot product
@@ -46,6 +47,23 @@ internal.get("/reservations/:orderId", async (req, res) => {
   const r = await reservations.get(orderId);
   if (!r) return res.status(404).json({ error: "reservation_not_found" });
   res.json({ orderId: r.orderId, status: r.status, items: r.items.map((i) => ({ productId: i.productId, quantity: i.quantity })) });
+});
+
+// Low-stock alerts for the admin "Events" page. Before M6.5 the order service read our stock_alerts
+// table directly (one shared database); now it has to ASK - this is the only way in.
+internal.get("/stock-alerts", async (_req, res) => {
+  const alerts = await prisma.stockAlert.findMany({ orderBy: { available: "asc" } });
+  const info = await prisma.productInfo.findMany({ where: { productId: { in: alerts.map((a) => a.productId) } } });
+  const byId = new Map(info.map((i) => [i.productId, i]));
+  res.json(
+    alerts.map((a) => ({
+      productId: a.productId,
+      name: byId.get(a.productId)?.name ?? "(unknown product)",
+      sku: byId.get(a.productId)?.sku ?? "",
+      available: a.available,
+      updatedAt: a.updatedAt,
+    })),
+  );
 });
 
 export const createInventoryApp = () =>

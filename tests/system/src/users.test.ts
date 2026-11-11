@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { kitEnv as env } from "@scalecart/service-kit/env";
-import { prisma } from "@scalecart/order/config/prisma";
+import { disconnectAll, orderDb } from "./db.js";
 import { authenticate, requireRole } from "@scalecart/service-kit/auth";
 import { errorHandler } from "@scalecart/service-kit/error-handler";
 import { startCluster, type Cluster } from "./test-cluster.js";
@@ -21,8 +21,8 @@ const email = (n: string) => `test-${run}-${n}@example.com`;
 
 afterAll(async () => {
   await cluster.close();
-  await prisma.user.deleteMany({ where: { email: { startsWith: `test-${run}-` } } });
-  await prisma.$disconnect();
+  await orderDb.user.deleteMany({ where: { email: { startsWith: `test-${run}-` } } });
+  await disconnectAll();
 });
 
 describe("POST /auth/register", () => {

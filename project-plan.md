@@ -1309,7 +1309,7 @@ Use these exact checkpoints.
 
 * [x] Phase 1: npm workspaces + shared packages (service-kit chassis, event contracts)
 * [x] Phase 2: one app per service
-* [ ] Phase 3: database per service
+* [x] Phase 3: database per service
 * [ ] Phase 4: identity service (RS256 + JWKS)
 * [ ] Phase 5: catalog service
 * [ ] Phase 6: Dockerfile + CI per service

@@ -1,8 +1,8 @@
 /**
  * BOUNDARY CHECK - the rule that makes these real microservices:   npm run check:boundaries
  *
- *   An app may import:   its own files, the shared packages (@scalecart/service-kit, @scalecart/events,
- *                        and - until phase 3 - @scalecart/legacy-db), and npm libraries.
+ *   An app may import:   its own files, the shared packages (@scalecart/service-kit, @scalecart/events)
+ *                        and npm libraries.
  *   An app may NOT import another app (@scalecart/order, ...) or reach outside its folder (../../).
  *
  * Need another service's data? Call its API or listen to its events. Only tests/system (which

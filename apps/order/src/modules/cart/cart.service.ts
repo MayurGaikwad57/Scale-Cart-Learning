@@ -10,7 +10,7 @@ export const addItemSchema = z.object({ productId: uuid, quantity: quantity.defa
 export const updateItemSchema = z.object({ quantity });
 
 const itemInclude = {
-  product: { include: { inventory: { select: { available: true } } } },
+  product: true,
 } as const;
 
 // Each user has exactly one cart; it is created the first time it is needed.
@@ -26,7 +26,7 @@ async function view(userId: string) {
     orderBy: { id: "asc" },
   });
   const items = rows.map((r) => {
-    const stock = r.product.inventory?.available ?? 0;
+    const stock = r.product.stockAvailable; // our copy of the inventory service's number
     return {
       id: r.id,
       productId: r.productId,
@@ -55,7 +55,6 @@ export const cartService = {
   async addItem(userId: string, productId: string, qty: number) {
     const product = await prisma.product.findUnique({
       where: { id: productId },
-      include: { inventory: { select: { available: true } } },
     });
     if (!product || !product.active) throw notFound("product_not_found");
 
@@ -64,7 +63,7 @@ export const cartService = {
       where: { cartId_productId: { cartId: cart.id, productId } },
     });
     const wanted = (existing?.quantity ?? 0) + qty;
-    const stock = product.inventory?.available ?? 0;
+    const stock = product.stockAvailable;
     if (wanted > stock) throw conflict("insufficient_stock", `Only ${stock} in stock`);
     if (wanted > MAX_QTY_PER_ITEM) throw conflict("quantity_limit", `Max ${MAX_QTY_PER_ITEM} per item`);
 
@@ -84,7 +83,7 @@ export const cartService = {
       include: itemInclude,
     });
     if (!item) throw notFound("cart_item_not_found");
-    const stock = item.product.inventory?.available ?? 0;
+    const stock = item.product.stockAvailable;
     if (qty > stock) throw conflict("insufficient_stock", `Only ${stock} in stock`);
     await prisma.cartItem.update({ where: { id: itemId }, data: { quantity: qty } });
     return view(userId);

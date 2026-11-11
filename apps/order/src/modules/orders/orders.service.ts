@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Prisma } from "@scalecart/legacy-db";
+import { Prisma } from "../../generated/prisma/client.js";
 import { prisma } from "../../config/prisma.js";
 import { makeEvent, ORDERS_TOPIC, type OrderCancelled, type OrderConfirmed, type OrderCreated } from "@scalecart/events";
 import { publishEvent } from "../../events/publish.js";

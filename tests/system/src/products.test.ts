@@ -1,9 +1,10 @@
 import type { Express } from "express";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { prisma } from "@scalecart/order/config/prisma";
+
 import { startCluster, type Cluster } from "./test-cluster.js";
 import { cleanup, makeProduct, makeUser, RUN } from "./test-utils.js";
+import { disconnectAll } from "./db.js";
 
 let cluster: Cluster;
 let app: Express; // the API gateway, in front of the real services
@@ -20,7 +21,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await cluster.close();
   await cleanup();
-  await prisma.$disconnect();
+  await disconnectAll();
 });
 
 describe("products: reading", () => {

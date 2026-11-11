@@ -6,7 +6,7 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { broker } from "@scalecart/service-kit/broker";
 import { kitEnv as env } from "@scalecart/service-kit/env";
-import { prisma } from "@scalecart/order/config/prisma";
+import { disconnectAll, inventoryDb, notificationDb, orderDb, paymentDb } from "./db.js";
 import { makeEvent, ORDERS_TOPIC, type OrderCreated } from "@scalecart/events";
 import { publisherStats } from "@scalecart/service-kit/publisher";
 import { publishEvent } from "@scalecart/order/events/publish";
@@ -16,7 +16,7 @@ import { reconcileOnce } from "@scalecart/order/reconciler";
 import { sweepOnce } from "@scalecart/inventory/sweeper";
 import { MAX_ORDER_LINES, ordersService } from "@scalecart/order/modules/orders/orders.service";
 import { eventually, settle, startCluster, type Cluster } from "./test-cluster.js";
-import { cleanup, makeProduct, makeUser } from "./test-utils.js";
+import { cleanup, makeProduct, makeProducts, makeUser } from "./test-utils.js";
 
 // M6: the things that only exist BECAUSE the system is now distributed - the gateway, calls between
 // services that fail or time out, a service that is down, lost events, and duplicate deliveries.
@@ -37,7 +37,7 @@ afterAll(async () => {
     await cluster.close();
   } finally {
     await cleanup();
-    await prisma.$disconnect();
+    await disconnectAll();
   }
 });
 
@@ -45,7 +45,7 @@ const buy = async (u: U, productId: string, quantity = 1, paymentMethod = "TEST_
   await request(app).post("/cart/items").set(u.auth).send({ productId, quantity }).expect(201);
   return request(app).post("/orders").set(u.auth).send({ paymentMethod });
 };
-const stock = (productId: string) => prisma.inventory.findUniqueOrThrow({ where: { productId } });
+const stock = (productId: string) => inventoryDb.inventory.findUniqueOrThrow({ where: { productId } });
 const internal = { "x-internal-token": env.INTERNAL_TOKEN };
 
 describe("asynchronous payment: the payment service can be down", () => {
@@ -127,7 +127,7 @@ describe("checkout when the inventory service is unavailable", () => {
     } finally {
       await cluster.restart("inventory");
     }
-    expect(await prisma.order.count({ where: { userId: u.user.id } })).toBe(0);
+    expect(await orderDb.order.count({ where: { userId: u.user.id } })).toBe(0);
     expect(await stock(p.id)).toMatchObject({ available: 5, reserved: 0 });
     expect((await request(app).get("/cart").set(u.auth)).body.itemCount).toBe(2);
   });
@@ -164,13 +164,13 @@ describe("checkout when the inventory service is unavailable", () => {
       serviceUrls.inventory = realUrl;
     }
     expect(res.status).toBe(503);
-    const order = await prisma.order.findFirstOrThrow({ where: { userId: u.user.id } });
+    const order = await orderDb.order.findFirstOrThrow({ where: { userId: u.user.id } });
     expect(order).toMatchObject({ status: "CANCELLED", statusReason: "inventory_unavailable", idempotencyKey: null });
     expect((await request(app).get("/cart").set(u.auth)).body.itemCount).toBe(2); // cart restored
 
     // The late reserve finally arrives at the inventory service... and is refused.
     expect(await lateAnswer).toBe(409);
-    expect(await prisma.reservation.findUniqueOrThrow({ where: { orderId: order.id } })).toMatchObject({ status: "RELEASED" });
+    expect(await inventoryDb.reservation.findUniqueOrThrow({ where: { orderId: order.id } })).toMatchObject({ status: "RELEASED" });
     expect(await stock(p.id)).toMatchObject({ available: 5, reserved: 0 }); // no stock leaked
     slow.close();
   }, 15_000);
@@ -194,7 +194,7 @@ describe("reservations are idempotent state transitions", () => {
     expect(await (await release(orderId)).json()).toEqual({ status: "released" });
     expect(await (await release(orderId)).json()).toEqual({ status: "already_released" });
     expect(await stock(p.id)).toMatchObject({ available: 10, reserved: 0 });
-    await prisma.reservation.delete({ where: { orderId } });
+    await inventoryDb.reservation.delete({ where: { orderId } });
   });
 
   it("two racing reserves of the same order reserve the stock once", async () => {
@@ -204,7 +204,7 @@ describe("reservations are idempotent state transitions", () => {
     expect(statuses.sort()).toEqual([200, 200, 201]);
     expect(await stock(p.id)).toMatchObject({ available: 6, reserved: 4 });
     await release(orderId);
-    await prisma.reservation.delete({ where: { orderId } });
+    await inventoryDb.reservation.delete({ where: { orderId } });
   });
 
   it("release of an unknown order leaves a tombstone that blocks a later reserve", async () => {
@@ -215,7 +215,7 @@ describe("reservations are idempotent state transitions", () => {
     expect(late.status).toBe(409);
     expect(await late.json()).toEqual({ error: "reservation_released" });
     expect((await stock(p.id)).available).toBe(10);
-    await prisma.reservation.delete({ where: { orderId } });
+    await inventoryDb.reservation.delete({ where: { orderId } });
   });
 });
 
@@ -265,8 +265,8 @@ describe("lost and duplicate events", () => {
       const d = await broker.describe();
       return d.groups.every((g) => g.partitions.every((part) => part.lag === 0));
     });
-    expect(await prisma.payment.count({ where: { orderId: order.id } })).toBe(1);
-    expect(await prisma.notification.count({ where: { orderId: order.id } })).toBe(1);
+    expect(await paymentDb.payment.count({ where: { orderId: order.id } })).toBe(1);
+    expect(await notificationDb.notification.count({ where: { orderId: order.id } })).toBe(1);
     expect(await stock(p.id)).toMatchObject({ available: 4, reserved: 0 });
   });
 
@@ -295,7 +295,7 @@ describe("lost and duplicate events", () => {
 describe("code-review fixes (PR #4)", () => {
   /** An order row in PENDING, created directly (no checkout), for testing one step in isolation. */
   const pendingOrder = (u: U, productId: string, quantity: number, paymentMethod = "TEST_CARD_SUCCESS") =>
-    prisma.order.create({
+    orderDb.order.create({
       data: { userId: u.user.id, totalCents: 1000 * quantity, paymentMethod, items: { create: [{ productId, quantity, unitPriceCents: 1000 }] } },
     });
   const reserveDirect = (orderId: string, productId: string, quantity: number) =>
@@ -316,19 +316,19 @@ describe("code-review fixes (PR #4)", () => {
       expect((await reserveDirect(id, p.id, q)).status).toBe(201);
     }
     // The order service decided - but the OrderCancelled / OrderConfirmed events were "lost".
-    await prisma.order.update({ where: { id: cancelled.id }, data: { status: "CANCELLED" } });
-    await prisma.order.update({ where: { id: confirmed.id }, data: { status: "CONFIRMED" } });
+    await orderDb.order.update({ where: { id: cancelled.id }, data: { status: "CANCELLED" } });
+    await orderDb.order.update({ where: { id: confirmed.id }, data: { status: "CONFIRMED" } });
     expect(await stock(p.id)).toMatchObject({ available: 10, reserved: 10 });
 
     await sweepOnce(Date.now() + 3 * 60_000); // "3 minutes later"
-    const status = async (id: string) => (await prisma.reservation.findUniqueOrThrow({ where: { orderId: id } })).status;
+    const status = async (id: string) => (await inventoryDb.reservation.findUniqueOrThrow({ where: { orderId: id } })).status;
     expect(await status(cancelled.id)).toBe("RELEASED");
     expect(await status(ghost)).toBe("RELEASED");
     expect(await status(confirmed.id)).toBe("COMMITTED");
     expect(await status(pending.id)).toBe("HELD"); // still in progress: left alone
     expect(await stock(p.id)).toMatchObject({ available: 16, reserved: 1 });
-    await prisma.order.update({ where: { id: pending.id }, data: { status: "CANCELLED" } }); // keep the reconciler away
-    await prisma.reservation.delete({ where: { orderId: ghost } });
+    await orderDb.order.update({ where: { id: pending.id }, data: { status: "CANCELLED" } }); // keep the reconciler away
+    await inventoryDb.reservation.delete({ where: { orderId: ghost } });
   });
 
   it("cancelling restores the cart WITHOUT doubling items re-added meanwhile", async () => {
@@ -364,20 +364,20 @@ describe("code-review fixes (PR #4)", () => {
     const p = await makeProduct(7);
     const orderId = randomUUID();
     await reserveDirect(orderId, p.id, 3); // available 4
-    await prisma.stockAlert.create({ data: { productId: p.id, available: 4 } }); // raised while held
+    await inventoryDb.stockAlert.create({ data: { productId: p.id, available: 4 } }); // raised while held
     await fetch(`${serviceUrls.inventory}/internal/reservations/${orderId}/release`, { method: "POST", headers: internal });
-    expect(await prisma.stockAlert.findUnique({ where: { productId: p.id } })).toBeNull(); // 7 > threshold
-    await prisma.reservation.delete({ where: { orderId } });
+    expect(await inventoryDb.stockAlert.findUnique({ where: { productId: p.id } })).toBeNull(); // 7 > threshold
+    await inventoryDb.reservation.delete({ where: { orderId } });
   });
 
   it(`a cart with more than ${MAX_ORDER_LINES} products gets a clear 400, not 'inventory unavailable'`, async () => {
     const u = await makeUser();
-    const products = await Promise.all(Array.from({ length: MAX_ORDER_LINES + 1 }, () => makeProduct(1)));
-    const cart = await prisma.cart.create({ data: { userId: u.user.id } });
-    await prisma.cartItem.createMany({ data: products.map((p) => ({ cartId: cart.id, productId: p.id, quantity: 1 })) });
+    const products = await makeProducts(MAX_ORDER_LINES + 1, 1);
+    const cart = await orderDb.cart.create({ data: { userId: u.user.id } });
+    await orderDb.cartItem.createMany({ data: products.map((p) => ({ cartId: cart.id, productId: p.id, quantity: 1 })) });
     const res = await request(app).post("/orders").set(u.auth).send({ paymentMethod: "TEST_CARD_SUCCESS" });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("too_many_items");
-    expect(await prisma.order.count({ where: { userId: u.user.id } })).toBe(0);
+    expect(await orderDb.order.count({ where: { userId: u.user.id } })).toBe(0);
   });
 });

@@ -1,46 +1,80 @@
 import { randomUUID } from "node:crypto";
 import jwt from "jsonwebtoken";
 import { kitEnv as env } from "@scalecart/service-kit/env";
-import { prisma } from "@scalecart/order/config/prisma";
+import { inventoryDb, notificationDb, orderDb, paymentDb } from "./db.js";
 
 // Test helpers: create users/products straight in the DB (fast, no bcrypt) and tag them with a
 // per-run prefix so cleanup only ever deletes rows this run created.
 export const RUN = `t${Date.now()}${Math.floor(Math.random() * 1000)}`;
 
 export async function makeUser(role: "CUSTOMER" | "ADMIN" = "CUSTOMER") {
-  const user = await prisma.user.create({
+  const user = await orderDb.user.create({
     data: { email: `${RUN}-${randomUUID().slice(0, 8)}@example.com`, passwordHash: "x", role },
   });
   const token = jwt.sign({ role }, env.JWT_SECRET, { subject: user.id, expiresIn: "1h" });
   return { user, auth: { Authorization: `Bearer ${token}` } };
 }
 
-export const makeProduct = (stock: number, over: { priceCents?: number; category?: string; name?: string; active?: boolean } = {}) =>
-  prisma.product.create({
+/**
+ * A test product = a row in the ORDER service's database (with its stock copy) + its stock row and
+ * product info in the INVENTORY service's database. In the running system the second half happens
+ * through the ProductCreated event; tests write both directly so they don't depend on event timing.
+ */
+export async function makeProduct(stock: number, over: { priceCents?: number; category?: string; name?: string; active?: boolean } = {}) {
+  const product = await orderDb.product.create({
     data: {
       sku: `${RUN}-${randomUUID().slice(0, 8)}`,
       name: over.name ?? `Test product ${RUN}`,
       priceCents: over.priceCents ?? 1000,
       category: over.category ?? `${RUN}-cat`,
       active: over.active ?? true,
-      inventory: { create: { available: stock } },
+      stockAvailable: stock,
+      stockVersion: 0,
     },
   });
+  await inventoryDb.inventory.create({ data: { productId: product.id, available: stock } });
+  await inventoryDb.productInfo.create({ data: { productId: product.id, sku: product.sku, name: product.name } });
+  return product;
+}
 
+/** Many test products at once: 3 bulk inserts instead of 3 x n single ones (no load spike on the pools). */
+export async function makeProducts(n: number, stock: number) {
+  const rows = Array.from({ length: n }, () => ({
+    id: randomUUID(),
+    sku: `${RUN}-${randomUUID().slice(0, 8)}`,
+    name: `Test product ${RUN}`,
+    priceCents: 1000,
+    category: `${RUN}-cat`,
+  }));
+  await orderDb.product.createMany({ data: rows.map((r) => ({ ...r, stockAvailable: stock, stockVersion: 0 })) });
+  await inventoryDb.inventory.createMany({ data: rows.map((r) => ({ productId: r.id, available: stock })) });
+  await inventoryDb.productInfo.createMany({ data: rows.map((r) => ({ productId: r.id, sku: r.sku, name: r.name })) });
+  return rows;
+}
+
+/** Delete everything this run created - in EVERY service's database (no cross-database cascades). */
 export async function cleanup() {
-  const users = await prisma.user.findMany({ where: { email: { startsWith: `${RUN}-` } }, select: { id: true } });
+  const users = await orderDb.user.findMany({ where: { email: { startsWith: `${RUN}-` } }, select: { id: true } });
   const userIds = users.map((u) => u.id);
-  const products = await prisma.product.findMany({ where: { sku: { startsWith: `${RUN}-` } }, select: { id: true } });
+  const products = await orderDb.product.findMany({ where: { sku: { startsWith: `${RUN}-` } }, select: { id: true } });
   const productIds = products.map((p) => p.id);
-  const orders = await prisma.order.findMany({ where: { userId: { in: userIds } }, select: { id: true } });
+  const orders = await orderDb.order.findMany({ where: { userId: { in: userIds } }, select: { id: true } });
   const orderIds = orders.map((o) => o.id);
-  await prisma.payment.deleteMany({ where: { orderId: { in: orderIds } } });
-  await prisma.reservation.deleteMany({ where: { orderId: { in: orderIds } } }); // M6 (items cascade)
-  await prisma.reservationItem.deleteMany({ where: { productId: { in: productIds } } });
-  await prisma.orderItem.deleteMany({ where: { OR: [{ orderId: { in: orderIds } }, { productId: { in: productIds } }] } });
-  await prisma.order.deleteMany({ where: { id: { in: orderIds } } });
-  await prisma.cartItem.deleteMany({ where: { productId: { in: productIds } } });
-  await prisma.cart.deleteMany({ where: { userId: { in: userIds } } });
-  await prisma.product.deleteMany({ where: { id: { in: productIds } } }); // inventory cascades
-  await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+  // payment service
+  await paymentDb.payment.deleteMany({ where: { orderId: { in: orderIds } } });
+  // notification service
+  await notificationDb.notification.deleteMany({ where: { userId: { in: userIds } } });
+  // inventory service
+  await inventoryDb.reservation.deleteMany({ where: { orderId: { in: orderIds } } }); // items cascade (same DB)
+  await inventoryDb.reservationItem.deleteMany({ where: { productId: { in: productIds } } });
+  await inventoryDb.stockAlert.deleteMany({ where: { productId: { in: productIds } } });
+  await inventoryDb.inventory.deleteMany({ where: { productId: { in: productIds } } });
+  await inventoryDb.productInfo.deleteMany({ where: { productId: { in: productIds } } });
+  // order service
+  await orderDb.orderItem.deleteMany({ where: { OR: [{ orderId: { in: orderIds } }, { productId: { in: productIds } }] } });
+  await orderDb.order.deleteMany({ where: { id: { in: orderIds } } });
+  await orderDb.cartItem.deleteMany({ where: { productId: { in: productIds } } });
+  await orderDb.cart.deleteMany({ where: { userId: { in: userIds } } });
+  await orderDb.product.deleteMany({ where: { id: { in: productIds } } });
+  await orderDb.user.deleteMany({ where: { id: { in: userIds } } });
 }

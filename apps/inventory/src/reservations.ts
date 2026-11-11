@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Prisma } from "@scalecart/legacy-db";
+import { Prisma } from "./generated/prisma/client.js";
 import { prisma } from "./config/prisma.js";
 import { publishStockChanged } from "./events/stock-changed.js";
 import { uuid } from "@scalecart/service-kit/validation";

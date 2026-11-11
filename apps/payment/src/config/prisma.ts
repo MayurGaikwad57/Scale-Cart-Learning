@@ -1,8 +1,10 @@
-import { createPrisma } from "@scalecart/legacy-db";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "../generated/prisma/client.js";
 import { env } from "./env.js";
 
-// One client per process (it holds a connection pool). Phase 3: this service's OWN database.
-export const prisma = createPrisma(env.DATABASE_URL, env.DATABASE_POOL_MAX);
+// One client per process (it holds a pool of at most DATABASE_POOL_MAX connections) to THIS
+// service's own database. No other service has the address or the credentials of this database.
+export const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: env.PAYMENT_DATABASE_URL, max: env.DATABASE_POOL_MAX }) });
 
 /** What the service chassis needs: a readiness probe and a clean disconnect on shutdown. */
 export const db = {

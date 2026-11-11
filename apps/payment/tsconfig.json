@@ -14,9 +14,6 @@
     },
     {
       "path": "../../packages/events"
-    },
-    {
-      "path": "../../packages/legacy-db"
     }
   ]
 }

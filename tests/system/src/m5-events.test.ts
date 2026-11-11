@@ -5,10 +5,10 @@ import path from "node:path";
 import type { Express } from "express";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { Prisma } from "@scalecart/legacy-db";
+import type { Prisma } from "@scalecart/notification/generated/prisma/client";
 import { broker } from "@scalecart/service-kit/broker";
 import { kv } from "@scalecart/service-kit/kv";
-import { prisma } from "@scalecart/order/config/prisma";
+import { disconnectAll, inventoryDb, notificationDb, orderDb } from "./db.js";
 import { once } from "@scalecart/notification/events/once";
 import { publisherStats } from "@scalecart/service-kit/publisher";
 import { startWorkers, stopWorkers } from "./test-cluster.js";
@@ -33,7 +33,7 @@ const today = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00.000Z")
 let salesBefore: Awaited<ReturnType<typeof sales>>;
 // revenueCents is a BigInt column; compare as plain numbers in the tests.
 const sales = async () => {
-  const row = await prisma.salesDaily.findUnique({ where: { day: today } });
+  const row = await orderDb.salesDaily.findUnique({ where: { day: today } });
   return row && { ...row, revenueCents: Number(row.revenueCents) };
 };
 const eventIds: string[] = [];
@@ -65,14 +65,15 @@ afterAll(async () => {
     await cluster.close();
     // Undo what the consumers wrote outside the test users/products (those cascade in cleanup()).
     if (broker.isReady) await collectEventIds();
-    await prisma.processedEvent.deleteMany({ where: { eventId: { in: eventIds } } });
-    if (salesBefore) await prisma.salesDaily.update({ where: { day: today }, data: salesBefore });
-    else await prisma.salesDaily.deleteMany({ where: { day: today } });
+    // processed_events now live in EACH consumer's own database
+    await Promise.all([orderDb, inventoryDb, notificationDb].map((db) => db.processedEvent.deleteMany({ where: { eventId: { in: eventIds } } })));
+    if (salesBefore) await orderDb.salesDaily.update({ where: { day: today }, data: salesBefore });
+    else await orderDb.salesDaily.deleteMany({ where: { day: today } });
     await Promise.all([kv.disconnect(), broker.conn.disconnect()]);
     await Promise.all([kvServer.close(), logServer.close()]);
   } finally {
     await cleanup();
-    await prisma.$disconnect();
+    await disconnectAll();
   }
 });
 
@@ -99,7 +100,7 @@ describe("an order's events flow through every consumer group", () => {
     expect(n.items[0]).toMatchObject({ title: "Order confirmed", orderId: res.body.id });
     expect(n.unread).toBe(1);
     await expect.poll(async () => (await sales())?.revenueCents ?? 0, { timeout: 10_000 }).toBe(before + 5000);
-    await expect.poll(() => prisma.stockAlert.findUnique({ where: { productId: p.id } }), { timeout: 10_000 }).toMatchObject({ available: 4 });
+    await expect.poll(() => inventoryDb.stockAlert.findUnique({ where: { productId: p.id } }), { timeout: 10_000 }).toMatchObject({ available: 4 });
 
     await request(app).post("/notifications/read-all").set(u.auth).expect(204);
     expect((await notifications(u)).unread).toBe(0);
@@ -113,7 +114,7 @@ describe("an order's events flow through every consumer group", () => {
     expect((await settle(app, u.auth, res.body.id)).status).toBe("CANCELLED");
     await expect.poll(async () => (await notifications(u)).items[0]?.title, { timeout: 10_000 }).toBe("Payment declined");
     await expect.poll(async () => (await sales())?.cancelledOrders ?? 0, { timeout: 10_000 }).toBe(cancelledBefore + 1);
-    expect(await prisma.stockAlert.findUnique({ where: { productId: p.id } })).toBeNull();
+    expect(await inventoryDb.stockAlert.findUnique({ where: { productId: p.id } })).toBeNull();
   });
 });
 
@@ -206,11 +207,11 @@ describe("code-review fixes", () => {
   it("marks only the notifications the user actually saw", async () => {
     const u = await makeUser();
     const [seen, unseen] = await Promise.all(
-      ["seen", "arrived later"].map((title) => prisma.notification.create({ data: { userId: u.user.id, title, body: "-" } })),
+      ["seen", "arrived later"].map((title) => notificationDb.notification.create({ data: { userId: u.user.id, title, body: "-" } })),
     );
     const res = await request(app).post("/notifications/read").set(u.auth).send({ ids: [seen.id] });
     expect(res.body.unread).toBe(1);
-    expect((await prisma.notification.findUniqueOrThrow({ where: { id: unseen.id } })).read).toBe(false);
+    expect((await notificationDb.notification.findUniqueOrThrow({ where: { id: unseen.id } })).read).toBe(false);
   });
 });
 
@@ -220,8 +221,8 @@ describe("admin view", () => {
     expect(res.body.broker.status).toBe("ready");
     expect(res.body.cluster.topics.find((t: { name: string }) => t.name === "orders").partitions).toHaveLength(3);
     const groups = res.body.cluster.groups.map((g: { group: string }) => g.group);
-    expect(groups).toEqual(expect.arrayContaining(["payment", "order", "notification", "inventory", "analytics", "product_cache"]));
-    expect(res.body.localConsumers).toHaveLength(6); // in tests every group runs in this one process
+    expect(groups).toEqual(expect.arrayContaining(["payment", "order", "notification", "inventory", "analytics", "product_stock", "product_sync"]));
+    expect(res.body.localConsumers).toHaveLength(7); // in tests every group runs in this one process
     expect(res.body.groups.find((g: { group: string }) => g.group === "payment")).toMatchObject({ topic: "orders", service: "payment" });
     await request(app).get("/admin/events").set((await makeUser()).auth).expect(403);
   });

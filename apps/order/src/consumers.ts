@@ -4,5 +4,5 @@ import { consumerDef } from "@scalecart/events";
 export const consumers = [
   consumerDef("order", async () => (await import("./payment-results.handler.js")).paymentResultHandler),
   consumerDef("analytics", async () => (await import("./analytics.handler.js")).analyticsHandler),
-  consumerDef("product_cache", async () => (await import("./product-cache.handler.js")).productCacheHandler),
+  consumerDef("product_stock", async () => (await import("./product-stock.handler.js")).productStockHandler),
 ];

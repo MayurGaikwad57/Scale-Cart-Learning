@@ -1,3 +1,6 @@
+-- CreateSchema
+CREATE SCHEMA IF NOT EXISTS "public";
+
 -- CreateEnum
 CREATE TYPE "Role" AS ENUM ('CUSTOMER', 'ADMIN');
 
@@ -28,18 +31,10 @@ CREATE TABLE "products" (
     "category" TEXT NOT NULL,
     "active" BOOLEAN NOT NULL DEFAULT true,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "stock_available" INTEGER NOT NULL DEFAULT 0,
+    "stock_version" INTEGER NOT NULL DEFAULT -1,
 
     CONSTRAINT "products_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "inventory" (
-    "product_id" UUID NOT NULL,
-    "available" INTEGER NOT NULL,
-    "reserved" INTEGER NOT NULL DEFAULT 0,
-    "version" INTEGER NOT NULL DEFAULT 0,
-
-    CONSTRAINT "inventory_pkey" PRIMARY KEY ("product_id")
 );
 
 -- CreateTable
@@ -67,6 +62,10 @@ CREATE TABLE "orders" (
     "status" "OrderStatus" NOT NULL DEFAULT 'PENDING',
     "total_cents" INTEGER NOT NULL,
     "idempotency_key" TEXT,
+    "idempotency_fingerprint" TEXT,
+    "payment_method" TEXT,
+    "payment_status" "PaymentStatus" NOT NULL DEFAULT 'PENDING',
+    "status_reason" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "orders_pkey" PRIMARY KEY ("id")
@@ -84,15 +83,22 @@ CREATE TABLE "order_items" (
 );
 
 -- CreateTable
-CREATE TABLE "payments" (
-    "id" UUID NOT NULL,
-    "order_id" UUID NOT NULL,
-    "amount_cents" INTEGER NOT NULL,
-    "status" "PaymentStatus" NOT NULL DEFAULT 'PENDING',
-    "provider_ref" TEXT,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+CREATE TABLE "processed_events" (
+    "consumer_group" TEXT NOT NULL,
+    "event_id" UUID NOT NULL,
+    "processed_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "payments_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "processed_events_pkey" PRIMARY KEY ("consumer_group","event_id")
+);
+
+-- CreateTable
+CREATE TABLE "sales_daily" (
+    "day" DATE NOT NULL,
+    "confirmed_orders" INTEGER NOT NULL DEFAULT 0,
+    "cancelled_orders" INTEGER NOT NULL DEFAULT 0,
+    "revenue_cents" BIGINT NOT NULL DEFAULT 0,
+
+    CONSTRAINT "sales_daily_pkey" PRIMARY KEY ("day")
 );
 
 -- CreateIndex
@@ -114,16 +120,13 @@ CREATE UNIQUE INDEX "cart_items_cart_id_product_id_key" ON "cart_items"("cart_id
 CREATE INDEX "orders_user_id_created_at_idx" ON "orders"("user_id", "created_at" DESC);
 
 -- CreateIndex
+CREATE INDEX "orders_status_created_at_idx" ON "orders"("status", "created_at");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "orders_user_id_idempotency_key_key" ON "orders"("user_id", "idempotency_key");
 
 -- CreateIndex
 CREATE INDEX "order_items_order_id_idx" ON "order_items"("order_id");
-
--- CreateIndex
-CREATE INDEX "payments_order_id_idx" ON "payments"("order_id");
-
--- AddForeignKey
-ALTER TABLE "inventory" ADD CONSTRAINT "inventory_product_id_fkey" FOREIGN KEY ("product_id") REFERENCES "products"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "cart" ADD CONSTRAINT "cart_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -143,12 +146,3 @@ ALTER TABLE "order_items" ADD CONSTRAINT "order_items_order_id_fkey" FOREIGN KEY
 -- AddForeignKey
 ALTER TABLE "order_items" ADD CONSTRAINT "order_items_product_id_fkey" FOREIGN KEY ("product_id") REFERENCES "products"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
--- AddForeignKey
-ALTER TABLE "payments" ADD CONSTRAINT "payments_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "orders"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- Constraints Prisma's schema language cannot express.
--- Stock can never go negative, even if application logic has a bug (last line of defence against overselling).
-ALTER TABLE "inventory" ADD CONSTRAINT "inventory_available_nonneg" CHECK ("available" >= 0 AND "reserved" >= 0);
-ALTER TABLE "cart_items" ADD CONSTRAINT "cart_items_quantity_positive" CHECK ("quantity" > 0);
-ALTER TABLE "order_items" ADD CONSTRAINT "order_items_quantity_positive" CHECK ("quantity" > 0);
-ALTER TABLE "products" ADD CONSTRAINT "products_price_nonneg" CHECK ("price_cents" >= 0);
