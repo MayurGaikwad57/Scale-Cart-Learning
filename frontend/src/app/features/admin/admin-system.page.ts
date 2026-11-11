@@ -1,13 +1,15 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
-import { catchError, of, switchMap, tap, timer } from 'rxjs';
+import { catchError, map, of, switchMap, tap, timer } from 'rxjs';
 import { errorMessage } from '../../core/http-error';
-import { KvStatus, SystemStatus } from '../../core/models';
+import { KvStatus, RateLimitRule, SystemStatus } from '../../core/models';
+import { ServicesService } from '../../core/services/services.service';
 import { SystemService } from '../../core/services/system.service';
 import { Icon } from '../../shared/components/icon';
 
 const REFRESH_MS = 3000;
+type ServiceRule = RateLimitRule & { service: string };
 
 /**
  * Admin > System: live numbers from ScaleKV, our own Redis-like key-value store.
@@ -111,9 +113,9 @@ const REFRESH_MS = 3000;
               <table class="sc-table">
                 <thead><tr><th>Rule</th><th>Limit</th><th>Per</th></tr></thead>
                 <tbody>
-                  @for (r of s.rateLimits; track r.name) {
+                  @for (r of rateLimits(); track r.service + r.name) {
                     <tr>
-                      <td><div class="fw-semibold">{{ r.name }}</div><div class="sc-muted small">{{ r.appliesTo }}</div></td>
+                      <td><div class="fw-semibold">{{ r.name }} <span class="sc-muted fw-normal small">· {{ r.service }}</span></div><div class="sc-muted small">{{ r.appliesTo }}</div></td>
                       <td class="text-nowrap">{{ r.limit }} / {{ r.window }}</td>
                       <td>{{ r.per }}</td>
                     </tr>
@@ -143,6 +145,7 @@ const REFRESH_MS = 3000;
 })
 export class AdminSystemPage {
   private readonly system = inject(SystemService);
+  private readonly services = inject(ServicesService);
   protected readonly refreshSeconds = REFRESH_MS / 1000;
   protected readonly error = signal<string | null>(null);
 
@@ -159,6 +162,32 @@ export class AdminSystemPage {
       ),
     ),
     { initialValue: null },
+  );
+
+  /**
+   * Every service enforces - and reports - its OWN rate limits; the gateway's /admin/services collects
+   * them. (They used to be one shared list inside the service kit.)
+   */
+  protected readonly rateLimits = toSignal(
+    timer(0, REFRESH_MS * 5).pipe(
+      switchMap(() =>
+        this.services.overview().pipe(
+          map((o) => {
+            const rows: ServiceRule[] = (o.gateway.rateLimits ?? []).map((r) => ({ ...r, service: 'gateway' }));
+            const seen = new Set(rows.map((r) => r.name));
+            for (const s of o.services) {
+              for (const r of s.rateLimits ?? []) {
+                if (!seen.has(r.name)) rows.push({ ...r, service: s.service });
+                seen.add(r.name);
+              }
+            }
+            return rows;
+          }),
+          catchError(() => of([] as ServiceRule[])),
+        ),
+      ),
+    ),
+    { initialValue: [] as ServiceRule[] },
   );
 
   private static readonly TONES: Record<KvStatus, { label: string; pill: string; bg: string; fg: string }> = {

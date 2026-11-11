@@ -1,6 +1,7 @@
 import { ORDERS_TOPIC, type PaymentEvent } from "@scalecart/events";
 import { publishEvent } from "./events/publish.js";
-import { orderEvents, ordersService } from "./modules/orders/orders.service.js";
+import { orderEvents } from "./modules/orders/order.mapping.js";
+import { ordersService } from "./modules/orders/orders.service.js";
 
 /**
  * Consumer group "order" (runs in the Order Service) on the "payments" topic.

@@ -175,11 +175,7 @@ while coding) and as compiled JavaScript in production (`tsc -b` builds them fir
 
 - **Dual write** (save to DB, then publish) can lose an event if the process dies in between — M7's **outbox**
   fixes it, per service.
-- Follow-ups from the PR #6 code review (valid, not done yet - they need a real Docker to verify):
-  each image's `node_modules` holds the production dependencies of ALL workspaces (prune per app instead);
-  the 9 Dockerfiles are near copies (one Dockerfile with `ARG APP/PORT/ENTRY`); the admin Events page keeps its
-  own list of consumer groups (build it from the API's `cluster.groups` instead); `once()`, `worker.ts` and the
-  order/payment `publishEvent` wrapper are copied per app (move them into the kit, the Prisma client passed in).
+- Follow-ups from the PR #6 code review - DONE in M6.6 (see "M6.6 — justified refactoring" below).
 - Fixed from the review: a lost `ProductCreated` is re-published by the catalog's **announcer** (`announced_at`);
   inventory publishes `StockChanged` in the background (never delaying a reservation's answer); the JWKS cache
   REPLACES its key set on each fetch (retired keys stop being trusted) and waits for an in-flight fetch (no
@@ -188,3 +184,39 @@ while coding) and as compiled JavaScript in production (`tsc -b` builds them fir
   idempotent retry replays even while the catalog is down; the boundary check also catches `import "x"` / `require()`.
 - Our own ScaleKV / ScaleLog instead of Redis / Kafka, everything on one machine (no Docker locally — CI builds
   the images). The **architecture** is real-world; the **infrastructure** is local.
+
+## M6.6 — justified refactoring (only changes backed by evidence)
+
+The rule: measure or point at a concrete defect first; change only what that evidence justifies.
+
+| Change | Evidence | Principle |
+|---|---|---|
+| Malformed JSON -> **400**, oversized body -> **413** (were 500) | reproduced live; now tested (mutation-checked) | correctness |
+| `once()`, the worker process, the DB handle -> **service-kit** | byte-identical in 2 / 5 / 6 apps | DRY - one fix, one place |
+| `orders.service.ts` (323 lines, 6 jobs) -> `checkout.saga.ts` (orchestration), `orders.service.ts` (state changes), `order.mapping.ts` (API + events), `orders.validation.ts`, `clients/inventory.client.ts` | six responsibilities in one file | Single responsibility; prepares M7's outbox |
+| Rate-limit **rules** out of the kit; each service declares + reports its own, the gateway aggregates | the shared library contained the order service's business policy | Dependency inversion - change a limit without releasing the kit |
+| Admin Events page renders the group directory from the API | its own copy of the list missed 2 new groups | Open/closed |
+| **One** parameterised `Dockerfile`; each image installs **only its app's** production dependencies | 9 near-copies (one already broke CI); gateway shipped Prisma/pg/bcrypt | DRY; measured: gateway `node_modules` 15 MB instead of 88 MB |
+
+**Measured and deliberately NOT changed - inventory reservation (one UPDATE per product under row locks):**
+
+| products | median | p95 |
+|---|---|---|
+| 1 | 9.6 ms | 15.7 ms |
+| 10 | 15.9 ms | 20.7 ms |
+| 100 (max) | 88.1 ms | 101.4 ms |
+
+~0.8 ms per product; most of the time is the fixed HTTP + transaction cost. A bulk `UPDATE` would save 1-7 ms on
+normal carts - not worth hand-written SQL in the most delicate code path.
+
+**Fixed from the PR #7 code review** (a refactor must not change behaviour - the first one did): the single
+Dockerfile had lost ScaleKV/ScaleLog's `0.0.0.0` listen address and ScaleLog's data volume (now in the image;
+ScaleLog builds with `--target stateful`); `ARG APP` moved below `npm ci` (one cached install instead of nine) and
+an npm cache mount; the CI start check now runs every image until it prints "listening" (dummy settings); rate-limit
+rule names are namespaced `<service>.<rule>` and a clash fails at startup; the 400/413 answers carry a readable
+`message`; `prismaDb` moved to `service-kit/db.ts` (seed scripts no longer load the HTTP chassis).
+
+**Considered and rejected (no evidence of a problem):** a DI framework (plain parameters already inject what
+matters), repository interfaces over Prisma (tests run against real databases), splitting the events contract
+file, optimising `restoreCart` (a rare compensation path), moving the service registry out of the kit (listing
+the services IS its job, like DNS).

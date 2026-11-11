@@ -14,7 +14,8 @@ import { startWorkers } from "./test-cluster.js";
 import { serviceUrls } from "@scalecart/service-kit/registry";
 import { reconcileOnce } from "@scalecart/order/reconciler";
 import { sweepOnce } from "@scalecart/inventory/sweeper";
-import { MAX_ORDER_LINES, ordersService } from "@scalecart/order/modules/orders/orders.service";
+import { ordersService } from "@scalecart/order/modules/orders/orders.service";
+import { MAX_ORDER_LINES } from "@scalecart/order/modules/orders/orders.validation";
 import { eventually, settle, startCluster, type Cluster } from "./test-cluster.js";
 import { cleanup, makeProduct, makeProducts, makeUser } from "./test-utils.js";
 
@@ -108,6 +109,10 @@ describe("API gateway", () => {
     const byName = Object.fromEntries(res.body.services.map((s: { service: string }) => [s.service, s]));
     expect(Object.keys(byName).sort()).toEqual(["catalog", "identity", "inventory", "notification", "order", "payment"]);
     expect(byName.catalog.routes).toEqual(expect.arrayContaining(["/products", "/admin/system"])); // M6.5 phase 5
+    // Services REPORT the rate limits they enforce; the gateway collects them. (In this one-process test
+    // cluster every service reports every rule, so only the gateway's own list is asserted.)
+    expect(res.body.gateway.rateLimits.map((r: { name: string }) => r.name)).toContain("gateway.global");
+    expect(new Set(res.body.gateway.rateLimits.map((r: { name: string }) => r.name)).size).toBe(res.body.gateway.rateLimits.length); // no duplicates
     expect(byName.identity.routes).toEqual(["/auth"]); // M6.5: login moved out of the order service
     expect(byName.payment).toMatchObject({ up: true, status: "ready" });
     expect(byName.payment.groups.map((g: { group: string }) => g.group)).toEqual(["payment"]);

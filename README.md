@@ -60,9 +60,9 @@ Demo admin (from the seed): `admin@scalecart.com` / `Admin@12345`. Register any 
 
 ## Containers (Docker) and CI
 
-Every app has its own **`apps/<name>/Dockerfile`** (multi-stage: build -> production dependencies only -> a small
+**One `Dockerfile`** builds every app (multi-stage: build -> ONLY that app's production dependencies -> a small
 non-root image with `tini` as PID 1 and a health check). Build one from the repo root:
-`docker build -f apps/payment/Dockerfile -t scalecart/payment .`
+`docker build --build-arg APP=payment --build-arg PORT=3002 -t scalecart/payment .`
 
 **`docker-compose.yml`** runs the whole backend as containers: Postgres (an init script creates one database + one
 user per service), ScaleKV, ScaleLog (with a volume), one-shot **migration jobs**, the 6 services (each with ONLY its
