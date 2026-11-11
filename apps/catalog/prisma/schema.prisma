@@ -24,8 +24,14 @@ model Product {
   // arriving late can never overwrite a newer number. The checkout still asks inventory to reserve.
   stockAvailable Int @default(0) @map("stock_available")
   stockVersion   Int @default(-1) @map("stock_version")
+  // When ProductCreated was successfully published. NULL = not announced yet (broker was down): the
+  // inventory service has no stock row for it, so the ANNOUNCER re-publishes it (announcer.ts).
+  // (M7's outbox generalises this for every event.)
+  announcedAt    DateTime? @map("announced_at")
 
   // Serves the catalog filter (category) + price sort/range.
   @@index([category, priceCents])
+  // The announcer's query: products not announced yet.
+  @@index([announcedAt])
   @@map("products")
 }

@@ -185,7 +185,10 @@ export const ordersService = {
       throw badRequest("too_many_items", `An order can contain at most ${MAX_ORDER_LINES} different products. Please split it into several orders.`);
     }
     const fetchedIds = new Set(cartNow.map((i) => i.productId));
-    const products = await getProducts([...fetchedIds]);
+    // A RETRY of an order that already exists (same Idempotency-Key) must replay it even when the
+    // catalog is down - it needs no product data (the transaction below replays before using any).
+    const isReplay = !!idem && !!(await prisma.order.findFirst({ where: { userId, idempotencyKey: idem.key }, select: { id: true } }));
+    const products = isReplay ? new Map() : await getProducts([...fetchedIds]);
 
     return prisma.$transaction(
       async (tx) => {

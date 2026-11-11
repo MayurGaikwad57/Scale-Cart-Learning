@@ -4,6 +4,9 @@ import { prisma } from "./config/prisma.js";
 import { publishStockChanged } from "./events/stock-changed.js";
 import { uuid } from "@scalecart/service-kit/validation";
 
+/** Fire-and-forget: best-effort side effects must not slow down (or fail) the answer. */
+const inBackground = (p: Promise<unknown>) => void p.catch((e) => console.warn(`[inventory] background publish failed: ${(e as Error).message}`));
+
 /** A product with this many or fewer sellable units gets a low-stock alert. */
 export const LOW_STOCK_THRESHOLD = 5;
 
@@ -148,7 +151,9 @@ export const reservations = {
       { maxWait: 5_000, timeout: 10_000 },
     );
     // "available" changed -> product pages showing stock are stale (after commit, never inside).
-    if (result === "reserved") await publishStockChanged(input.items.map((i) => i.productId), "reservation");
+    // In the BACKGROUND: the order service is waiting for this answer (3 s timeout) - a slow broker
+    // must never turn a successful reservation into a "timeout" (code review).
+    if (result === "reserved") inBackground(publishStockChanged(input.items.map((i) => i.productId), "reservation"));
     return { status: result };
   },
 
@@ -202,7 +207,7 @@ export const reservations = {
       await refreshStockAlerts(tx, productIds, orderId, "release");
       return "released" as const;
     });
-    if (productIds.length) await publishStockChanged(productIds, "reservation");
+    if (productIds.length) inBackground(publishStockChanged(productIds, "reservation"));
     return result;
   },
 

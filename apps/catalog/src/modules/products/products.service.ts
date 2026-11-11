@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { deterministicEventId, makeEvent, type ProductCreated, type ProductUpdated } from "@scalecart/events";
+import { makeEvent, type ProductUpdated } from "@scalecart/events";
+import { announce } from "../../announcer.js";
 import { publishProductEvent } from "../../events/publish.js";
 import { cached, countBypass, type Cached } from "@scalecart/service-kit/cache";
 import { conflict, notFound } from "@scalecart/service-kit/errors";
@@ -80,9 +81,8 @@ export const productsService = {
       const product = toProductDto(await productsRepository.create(input));
       await invalidateProducts([product.id], { catalog: true }); // must appear in lists/categories
       // The inventory service creates the stock row from this event (it can't share our transaction).
-      await publishProductEvent(
-        makeEvent<ProductCreated>("ProductCreated", 1, { productId: product.id, sku: product.sku, name: product.name, initialStock: input.stock }, deterministicEventId("ProductCreated", product.id)),
-      );
+      // If the broker is down now, the ANNOUNCER re-publishes it later (announced_at stays NULL).
+      await announce({ id: product.id, sku: product.sku, name: product.name, stockAvailable: input.stock });
       return product;
     } catch (err) {
       if (isCode(err, "P2002")) throw conflict("sku_taken");

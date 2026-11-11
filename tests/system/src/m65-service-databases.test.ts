@@ -4,7 +4,9 @@ import pg from "pg";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { INVENTORY_TOPIC, makeEvent, TOPIC_PARTITIONS, type StockChanged } from "@scalecart/events";
+import { announceOnce } from "@scalecart/catalog/announcer";
 import { productStockHandler } from "@scalecart/catalog/product-stock.handler";
+import { broker } from "@scalecart/service-kit/broker";
 import { publish } from "@scalecart/service-kit/publisher";
 import { catalogDb, disconnectAll, inventoryDb } from "./db.js";
 import { eventually, startCluster, type Cluster } from "./test-cluster.js";
@@ -150,5 +152,49 @@ describe("products live in the CATALOG service (phase 5)", () => {
       await cluster.restart("catalog");
     }
     expect((await request(app).get("/cart").set(u.auth).expect(200)).body.items).toHaveLength(1);
+  });
+});
+
+describe("code review fixes (PR #6)", () => {
+  it("a ProductCreated lost while the broker was down is re-published by the ANNOUNCER", async () => {
+    await broker.conn.disconnect(); // the broker "is down" at the moment the admin creates the product
+    let created;
+    try {
+      created = await request(app)
+        .post("/products")
+        .set(admin.auth)
+        .send({ sku: RUN + "-lost-" + randomUUID().slice(0, 6), name: "Announced late", priceCents: 500, category: RUN + "-cat", stock: 6 })
+        .expect(201);
+    } finally {
+      broker.conn.connect("kv://127.0.0.1:" + cluster.logServer!.port);
+      await broker.conn.waitUntilReady();
+    }
+    const id = created.body.id as string;
+    expect((await catalogDb.product.findUnique({ where: { id } }))?.announcedAt).toBeNull(); // remembered as NOT announced
+    expect(await inventoryDb.inventory.findUnique({ where: { productId: id } })).toBeNull(); // so: not sellable yet
+    expect(await announceOnce()).toBeGreaterThanOrEqual(1); // what the running service does every 10 s
+    expect((await catalogDb.product.findUnique({ where: { id } }))?.announcedAt).not.toBeNull();
+    const row = await eventually(() => inventoryDb.inventory.findUnique({ where: { productId: id } }));
+    expect(row.available).toBe(6); // the stock row exists: the product can be sold
+  });
+
+  it("an idempotent RETRY of a placed order replays it even while the catalog is down", async () => {
+    const p = await makeProduct(5);
+    const u = await makeUser();
+    await request(app).post("/cart/items").set(u.auth).send({ productId: p.id }).expect(201);
+    const key = "retry-" + randomUUID();
+    const first = await request(app).post("/orders").set({ ...u.auth, "Idempotency-Key": key }).send({ paymentMethod: "TEST_CARD_SUCCESS" }).expect(201);
+    await settle(app, u.auth, first.body.id);
+    // The customer already put something new in the (emptied) cart - so a checkout WOULD need the catalog.
+    const other = await makeProduct(5);
+    await request(app).post("/cart/items").set(u.auth).send({ productId: other.id }).expect(201);
+    await cluster.stop("catalog");
+    try {
+      const retry = await request(app).post("/orders").set({ ...u.auth, "Idempotency-Key": key }).send({ paymentMethod: "TEST_CARD_SUCCESS" });
+      expect(retry.status).toBeLessThan(300); // replayed - not 503 catalog_unavailable
+      expect(retry.body.id).toBe(first.body.id);
+    } finally {
+      await cluster.restart("catalog");
+    }
   });
 });

@@ -27,13 +27,21 @@ if (!(await from.query("SELECT to_regclass('public.products') AS t")).rows[0].t)
   let moved = 0;
   for (const r of rows) {
     const res = await to.query(
-      `INSERT INTO products (${cols.join(", ")}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(", ")}) ON CONFLICT (id) DO NOTHING`,
+      `INSERT INTO products (${cols.join(", ")}) VALUES (${cols.map((_, i) => `$${i + 1}`).join(", ")}) ON CONFLICT DO NOTHING`, // ANY unique conflict (id or sku) is skipped, not fatal
       cols.map((c) => r[c]),
     );
     moved += res.rowCount ?? 0;
   }
   const inCatalog = Number((await to.query("SELECT count(*) FROM products")).rows[0].count);
   console.log(`order.products ${rows.length} -> catalog.products: inserted ${moved}, catalog now has ${inCatalog}`);
+  // A product whose ID is not in the catalog was skipped because its SKU exists there under another id.
+  const found = await to.query("SELECT id FROM products WHERE id = ANY($1::uuid[])", [rows.map((r) => r.id)]);
+  const ids = new Set(found.rows.map((r) => r.id));
+  const clashes = rows.filter((r) => !ids.has(r.id));
+  if (clashes.length) {
+    console.error("NOT moved (sku already in the catalog under another id): " + clashes.map((r) => r.sku).join(", "));
+    process.exit(1);
+  }
   if (inCatalog < rows.length) {
     console.error("catalog has FEWER products than order - do NOT run the order migration that drops them.");
     process.exit(1);

@@ -97,7 +97,7 @@ for (const [svc, copies] of Object.entries(PLAN)) {
       const params: unknown[] = [];
       const values = batch.map((r) => `(${cols.map((col) => (params.push(r[col]), `$${params.length}`)).join(", ")})`);
       const res = await target.query(
-        `INSERT INTO "${c.table}" (${cols.map((col) => `"${col}"`).join(", ")}) VALUES ${values.join(", ")} ON CONFLICT ${c.conflict} DO NOTHING`,
+        `INSERT INTO "${c.table}" (${cols.map((col) => `"${col}"`).join(", ")}) VALUES ${values.join(", ")} ON CONFLICT DO NOTHING`, // any unique conflict: skip (the count check reports it)
         params,
       );
       inserted += res.rowCount ?? 0;

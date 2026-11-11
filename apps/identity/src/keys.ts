@@ -1,4 +1,5 @@
 import { createPrivateKey, createPublicKey } from "node:crypto";
+import { trustLocalKey } from "@scalecart/service-kit/auth";
 import jwt from "jsonwebtoken";
 import { env } from "./config/env.js";
 
@@ -15,7 +16,10 @@ import { env } from "./config/env.js";
  * In production the private key lives in a secrets manager / KMS (AWS KMS, Vault), never in a file.
  */
 const privateKey = createPrivateKey(Buffer.from(env.JWT_PRIVATE_KEY, "base64").toString("utf8"));
-const publicJwk = { ...createPublicKey(privateKey).export({ format: "jwk" }), kid: env.JWT_KEY_ID, alg: "RS256", use: "sig" };
+const publicKey = createPublicKey(privateKey);
+const publicJwk = { ...publicKey.export({ format: "jwk" }), kid: env.JWT_KEY_ID, alg: "RS256", use: "sig" };
+// /auth/me verifies tokens in THIS process: trust our own key directly (no HTTP call to ourselves).
+trustLocalKey(env.JWT_KEY_ID, publicKey);
 
 export const TOKEN_TTL = "1h";
 

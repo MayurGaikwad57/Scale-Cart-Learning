@@ -24,7 +24,8 @@ const files = (dir: string): string[] =>
     return /\.(ts|mts)$/.test(e.name) ? [p] : [];
   });
 
-const IMPORT = /(?:import|export)\s[^'"]*?from\s*["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/g;
+// import x from "m" | export x from "m" | import "m" (side effect) | import("m") | require("m")
+const IMPORT = /(?:import|export)\s[^'"]*?from\s*["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)|import\s+["']([^"']+)["']|require\(\s*["']([^"']+)["']\s*\)/g;
 const problems: string[] = [];
 
 for (const app of apps) {
@@ -32,7 +33,7 @@ for (const app of apps) {
   for (const file of files(path.join(appRoot, "src"))) {
     const text = fs.readFileSync(file, "utf8");
     for (const m of text.matchAll(IMPORT)) {
-      const spec = m[1] ?? m[2];
+      const spec = m[1] ?? m[2] ?? m[3] ?? m[4];
       const where = `${path.relative(root, file)}: "${spec}"`;
       const pkg = spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0];
       if (appPackages.has(pkg) && pkg !== `@scalecart/${app}`) problems.push(`${where} -> imports ANOTHER service (${pkg})`);

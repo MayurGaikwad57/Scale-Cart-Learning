@@ -44,10 +44,30 @@ async function fetchKeys() {
   const res = await fetch(jwksUrl(), { signal: AbortSignal.timeout(2000) });
   if (!res.ok) throw new Error(`JWKS answered ${res.status}`);
   const body = (await res.json()) as { keys: ({ kid?: string } & Record<string, unknown>)[] };
-  for (const jwk of body.keys) if (jwk.kid) keys.set(jwk.kid, createPublicKey({ key: jwk as Parameters<typeof createPublicKey>[0] & object, format: "jwk" } as never));
+  // REPLACE the set, don't merge into it: a key the identity service no longer publishes (retired
+  // or compromised) must stop being trusted on the next fetch, not live on until a restart.
+  const fresh = new Map<string, KeyObject>();
+  for (const jwk of body.keys) if (jwk.kid) fresh.set(jwk.kid, createPublicKey({ key: jwk as Parameters<typeof createPublicKey>[0] & object, format: "jwk" } as never));
+  keys.clear();
+  for (const [kid, key] of fresh) keys.set(kid, key);
+  for (const [kid, key] of localKeys) keys.set(kid, key);
+}
+
+/**
+ * For the identity service itself: it HAS its key pair, so it trusts its own public key directly
+ * instead of downloading its own JWKS over HTTP.
+ */
+const localKeys = new Map<string, KeyObject>();
+export function trustLocalKey(kid: string, publicKey: KeyObject) {
+  localKeys.set(kid, publicKey);
+  keys.set(kid, publicKey);
 }
 
 async function keyFor(kid: string): Promise<KeyObject | undefined> {
+  if (keys.has(kid)) return keys.get(kid);
+  // A fetch is already running (e.g. the first tokens after a key rotation): wait for it instead of
+  // answering 401 - it is probably bringing exactly this key (code review).
+  if (inflight) await inflight.catch(() => undefined);
   if (keys.has(kid)) return keys.get(kid);
   if (Date.now() - lastFetch < REFETCH_MIN_INTERVAL_MS && keys.size) return undefined; // just tried
   inflight ??= fetchKeys().finally(() => (inflight = undefined)); // one fetch, however many requests wait

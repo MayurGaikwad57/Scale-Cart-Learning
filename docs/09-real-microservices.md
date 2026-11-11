@@ -178,6 +178,13 @@ while coding) and as compiled JavaScript in production (`tsc -b` builds them fir
 - Follow-ups from the PR #6 code review (valid, not done yet - they need a real Docker to verify):
   each image's `node_modules` holds the production dependencies of ALL workspaces (prune per app instead);
   the 9 Dockerfiles are near copies (one Dockerfile with `ARG APP/PORT/ENTRY`); the admin Events page keeps its
-  own list of consumer groups (build it from the API's `cluster.groups` instead).
+  own list of consumer groups (build it from the API's `cluster.groups` instead); `once()`, `worker.ts` and the
+  order/payment `publishEvent` wrapper are copied per app (move them into the kit, the Prisma client passed in).
+- Fixed from the review: a lost `ProductCreated` is re-published by the catalog's **announcer** (`announced_at`);
+  inventory publishes `StockChanged` in the background (never delaying a reservation's answer); the JWKS cache
+  REPLACES its key set on each fetch (retired keys stop being trusted) and waits for an in-flight fetch (no
+  spurious 401s during rotation); identity trusts its own key locally; `db:deploy` runs the data moves BEFORE the
+  order migrations that drop tables; the move scripts skip and report email/sku clashes instead of aborting; an
+  idempotent retry replays even while the catalog is down; the boundary check also catches `import "x"` / `require()`.
 - Our own ScaleKV / ScaleLog instead of Redis / Kafka, everything on one machine (no Docker locally — CI builds
   the images). The **architecture** is real-world; the **infrastructure** is local.

@@ -4,11 +4,10 @@
 // M6.5: products live in the CATALOG service's database, their stock in the INVENTORY service's. The
 // seed creates the products here and publishes ProductCreated for each NEW one; the inventory
 // service creates the stock rows from those events (it is the only one that writes its database).
-import { deterministicEventId, makeEvent, type ProductCreated } from "@scalecart/events";
 import { broker } from "@scalecart/service-kit/broker";
+import { announceOnce } from "../announcer.js";
 import { env } from "../config/env.js";
 import { prisma } from "../config/prisma.js";
-import { publishProductEvent } from "../events/publish.js";
 
 // [sku, name, description, price in cents, category, stock]
 const products: [string, string, string, number, string, number][] = [
@@ -42,15 +41,15 @@ async function main() {
     const p = existing
       ? await prisma.product.update({ where: { sku }, data: { name, description, priceCents, category } })
       : await prisma.product.create({ data: { sku, name, description, priceCents, category, stockAvailable: stock } });
-    if (!existing) {
-      created++;
-      const ok = await publishProductEvent(
-        makeEvent<ProductCreated>("ProductCreated", 1, { productId: p.id, sku, name, initialStock: stock }, deterministicEventId("ProductCreated", p.id)),
-      );
-      if (!ok) throw new Error(`could not announce ${sku} to the inventory service (ScaleLog down?)`);
-    }
+    if (!existing) created++;
   }
-  console.log(`Seeded ${products.length} products (${created} new, announced to the inventory service).`);
+  // Announce every product the inventory service hasn't heard about yet - the new ones AND any whose
+  // announcement failed earlier (re-running the seed now repairs that; the running catalog service's
+  // announcer would too, within ~10 s).
+  const announced = await announceOnce();
+  const missing = await prisma.product.count({ where: { announcedAt: null } });
+  if (missing) throw new Error(`${missing} product(s) could not be announced to the inventory service (ScaleLog down?)`);
+  console.log(`Seeded ${products.length} products (${created} new, ${announced} announced to the inventory service).`);
 }
 
 main().finally(async () => {

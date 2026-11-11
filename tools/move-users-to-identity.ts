@@ -27,13 +27,24 @@ if (!exists) {
   let moved = 0;
   for (const r of rows) {
     const res = await to.query(
-      `INSERT INTO users (id, email, password_hash, role, created_at) VALUES ($1, $2, $3, $4::"Role", $5) ON CONFLICT (id) DO NOTHING`,
+      // No conflict target: skip on ANY unique conflict - same id (already moved) OR same email under
+      // another id (e.g. the identity seed already created admin@...) - instead of aborting halfway.
+      `INSERT INTO users (id, email, password_hash, role, created_at) VALUES ($1, $2, $3, $4::"Role", $5) ON CONFLICT DO NOTHING`,
       [r.id, r.email, r.password_hash, r.role, r.created_at],
     );
     moved += res.rowCount ?? 0;
   }
   const inIdentity = Number((await to.query("SELECT count(*) FROM users")).rows[0].count);
   console.log(`order.users ${rows.length} -> identity.users: inserted ${moved}, identity now has ${inIdentity}`);
+  // A user whose ID is not in identity was skipped because its EMAIL exists there under another id:
+  // its orders and cart would point at an id identity doesn't know. Stop and report - a human decides.
+  const found = await to.query("SELECT id FROM users WHERE id = ANY($1::uuid[])", [rows.map((r) => r.id)]);
+  const ids = new Set(found.rows.map((r) => r.id));
+  const clashes = rows.filter((r) => !ids.has(r.id));
+  if (clashes.length) {
+    console.error("NOT moved (email already in identity under another id): " + clashes.map((r) => r.email).join(", "));
+    process.exit(1);
+  }
   if (inIdentity < rows.length) {
     console.error("identity has FEWER users than order - do NOT drop the order service's users table.");
     process.exit(1);
