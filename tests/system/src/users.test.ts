@@ -154,3 +154,16 @@ describe("authenticate / requireRole middleware", () => {
     expect(asAdmin.status).toBe(200);
   });
 });
+
+describe("a client's bad request body is a 4xx, not 'our bug' (500)", () => {
+  it("malformed JSON -> 400 entity.parse.failed", async () => {
+    const res = await request(app).post("/auth/login").set("Content-Type", "application/json").send('{"email": "x@example.com",');
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: "entity.parse.failed" });
+  });
+  it("a body over the 100 KB limit -> 413 entity.too.large", async () => {
+    const res = await request(app).post("/auth/login").set("Content-Type", "application/json").send({ email: "x@example.com", password: "p".repeat(110_000) });
+    expect(res.status).toBe(413);
+    expect(res.body).toEqual({ error: "entity.too.large" });
+  });
+});
