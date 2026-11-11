@@ -170,7 +170,7 @@ export interface ServiceConsumer {
 }
 
 export interface ServiceStatus {
-  service: 'order' | 'payment' | 'inventory' | 'notification';
+  service: 'identity' | 'catalog' | 'order' | 'payment' | 'inventory' | 'notification';
   url: string;
   up: boolean;
   latencyMs: number;
