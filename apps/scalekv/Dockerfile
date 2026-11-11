@@ -52,8 +52,6 @@ COPY --from=build /repo/package.json ./
 COPY --from=prod-deps /repo/node_modules ./node_modules
 COPY --from=build /repo/packages/service-kit/package.json packages/service-kit/
 COPY --from=build /repo/packages/service-kit/dist packages/service-kit/dist
-COPY --from=build /repo/packages/events/package.json packages/events/
-COPY --from=build /repo/packages/events/dist packages/events/dist
 COPY --from=build /repo/apps/scalekv/package.json apps/scalekv/
 COPY --from=build /repo/apps/scalekv/dist apps/scalekv/dist
 

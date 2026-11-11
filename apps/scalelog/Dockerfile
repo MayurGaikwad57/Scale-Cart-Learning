@@ -52,8 +52,6 @@ COPY --from=build /repo/package.json ./
 COPY --from=prod-deps /repo/node_modules ./node_modules
 COPY --from=build /repo/packages/service-kit/package.json packages/service-kit/
 COPY --from=build /repo/packages/service-kit/dist packages/service-kit/dist
-COPY --from=build /repo/packages/events/package.json packages/events/
-COPY --from=build /repo/packages/events/dist packages/events/dist
 COPY --from=build /repo/apps/scalelog/package.json apps/scalelog/
 COPY --from=build /repo/apps/scalelog/dist apps/scalelog/dist
 # The broker keeps its partition files here: mount a VOLUME on it, or a restart loses every event.
