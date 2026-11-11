@@ -1,18 +1,166 @@
+# The WHOLE ScaleCart backend as containers - one container per service, like production.
+#
+#   npm run keys -w @scalecart/identity                       # once: the token signing key (writes apps/identity/.env)
+#   export JWT_PRIVATE_KEY=... JWT_KEY_ID=...                  # (copy them from apps/identity/.env)
+#   docker compose up --build                                  # build every image, start everything
+#   docker compose run --rm identity-migrate npm run seed -w @scalecart/identity   # admin account
+#   docker compose run --rm catalog-migrate  npm run seed -w @scalecart/catalog    # sample products
+#   -> API gateway on http://localhost:3000 (the Angular app's API URL)
+#
+# What it shows: every service is its own container with its OWN database credentials (it can't even
+# connect to another service's database), services find each other by NAME (http://catalog:3006 -
+# Docker's DNS, like Kubernetes services), migrations run as separate one-shot jobs BEFORE the service
+# starts, and only the gateway is published to the host.
+
+x-service-env: &service-env
+  NODE_ENV: production
+  KV_URL: kv://scalekv:6380
+  LOG_URL: kv://scalelog:9093
+  INTERNAL_TOKEN: ${INTERNAL_TOKEN:-scalecart-dev-internal-token}
+  # Requests reach the services through the gateway's container: trust X-Forwarded-For from the
+  # private Docker network so per-IP rate limits see the real client.
+  TRUST_PROXY: uniquelocal
+  # SERVICE DISCOVERY by container name (Docker DNS).
+  IDENTITY_SERVICE_URL: http://identity:3005
+  CATALOG_SERVICE_URL: http://catalog:3006
+  ORDER_SERVICE_URL: http://order:3001
+  PAYMENT_SERVICE_URL: http://payment:3002
+  INVENTORY_SERVICE_URL: http://inventory:3003
+  NOTIFICATION_SERVICE_URL: http://notification:3004
+
+x-restart: &restart
+  restart: unless-stopped
+
 services:
   postgres:
     image: postgres:17
     environment:
-      POSTGRES_USER: scalecart
-      POSTGRES_PASSWORD: scalecart
-      POSTGRES_DB: scalecart
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres-dev-password}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init-service-dbs.sh:/docker-entrypoint-initdb.d/10-service-dbs.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U scalecart"]
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
-      retries: 10
+      retries: 20
+
+  scalekv:
+    <<: *restart
+    build: { context: ., dockerfile: apps/scalekv/Dockerfile }
+
+  scalelog:
+    <<: *restart
+    build: { context: ., dockerfile: apps/scalelog/Dockerfile }
+    volumes:
+      - scalelog-data:/repo/apps/scalelog/data # the partition logs survive a container restart
+
+  # ---- one-shot MIGRATION jobs: the build stage (it still has the Prisma CLI) runs `prisma migrate deploy`
+  identity-migrate: &migrate
+    build: { context: ., dockerfile: apps/identity/Dockerfile, target: build }
+    command: npm run db:deploy -w @scalecart/identity
+    environment:
+      IDENTITY_DATABASE_URL: postgresql://identity_svc:${IDENTITY_DB_PASSWORD:-identity-dev-password}@postgres:5432/scalecart_identity
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      JWT_KEY_ID: ${JWT_KEY_ID:-}
+    depends_on: { postgres: { condition: service_healthy } }
+  catalog-migrate:
+    <<: *migrate
+    build: { context: ., dockerfile: apps/catalog/Dockerfile, target: build }
+    command: npm run db:deploy -w @scalecart/catalog
+    environment:
+      CATALOG_DATABASE_URL: postgresql://catalog_svc:${CATALOG_DB_PASSWORD:-catalog-dev-password}@postgres:5432/scalecart_catalog
+      LOG_URL: kv://scalelog:9093
+  order-migrate:
+    <<: *migrate
+    build: { context: ., dockerfile: apps/order/Dockerfile, target: build }
+    command: npm run db:deploy -w @scalecart/order
+    environment:
+      ORDER_DATABASE_URL: postgresql://order_svc:${ORDER_DB_PASSWORD:-order-dev-password}@postgres:5432/scalecart_order
+  inventory-migrate:
+    <<: *migrate
+    build: { context: ., dockerfile: apps/inventory/Dockerfile, target: build }
+    command: npm run db:deploy -w @scalecart/inventory
+    environment:
+      INVENTORY_DATABASE_URL: postgresql://inventory_svc:${INVENTORY_DB_PASSWORD:-inventory-dev-password}@postgres:5432/scalecart_inventory
+  payment-migrate:
+    <<: *migrate
+    build: { context: ., dockerfile: apps/payment/Dockerfile, target: build }
+    command: npm run db:deploy -w @scalecart/payment
+    environment:
+      PAYMENT_DATABASE_URL: postgresql://payment_svc:${PAYMENT_DB_PASSWORD:-payment-dev-password}@postgres:5432/scalecart_payment
+  notification-migrate:
+    <<: *migrate
+    build: { context: ., dockerfile: apps/notification/Dockerfile, target: build }
+    command: npm run db:deploy -w @scalecart/notification
+    environment:
+      NOTIFICATION_DATABASE_URL: postgresql://notification_svc:${NOTIFICATION_DB_PASSWORD:-notification-dev-password}@postgres:5432/scalecart_notification
+
+  # ---- the services: each knows ONLY its own database
+  identity:
+    <<: *restart
+    build: { context: ., dockerfile: apps/identity/Dockerfile }
+    environment:
+      <<: *service-env
+      IDENTITY_DATABASE_URL: postgresql://identity_svc:${IDENTITY_DB_PASSWORD:-identity-dev-password}@postgres:5432/scalecart_identity
+      # The signing key: ONLY this container gets it. (Production: a secrets manager, not an env var.)
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?run npm run keys -w @scalecart/identity and export JWT_PRIVATE_KEY}
+      JWT_KEY_ID: ${JWT_KEY_ID:?export JWT_KEY_ID from apps/identity/.env}
+    depends_on: { identity-migrate: { condition: service_completed_successfully } }
+
+  catalog:
+    <<: *restart
+    build: { context: ., dockerfile: apps/catalog/Dockerfile }
+    environment:
+      <<: *service-env
+      CATALOG_DATABASE_URL: postgresql://catalog_svc:${CATALOG_DB_PASSWORD:-catalog-dev-password}@postgres:5432/scalecart_catalog
+    depends_on: { catalog-migrate: { condition: service_completed_successfully }, scalekv: { condition: service_started }, scalelog: { condition: service_started } }
+
+  order:
+    <<: *restart
+    build: { context: ., dockerfile: apps/order/Dockerfile }
+    environment:
+      <<: *service-env
+      ORDER_DATABASE_URL: postgresql://order_svc:${ORDER_DB_PASSWORD:-order-dev-password}@postgres:5432/scalecart_order
+    depends_on: { order-migrate: { condition: service_completed_successfully }, scalekv: { condition: service_started }, scalelog: { condition: service_started } }
+
+  payment:
+    <<: *restart
+    build: { context: ., dockerfile: apps/payment/Dockerfile }
+    environment:
+      <<: *service-env
+      PAYMENT_DATABASE_URL: postgresql://payment_svc:${PAYMENT_DB_PASSWORD:-payment-dev-password}@postgres:5432/scalecart_payment
+    depends_on: { payment-migrate: { condition: service_completed_successfully }, scalelog: { condition: service_started } }
+
+  inventory:
+    <<: *restart
+    build: { context: ., dockerfile: apps/inventory/Dockerfile }
+    environment:
+      <<: *service-env
+      INVENTORY_DATABASE_URL: postgresql://inventory_svc:${INVENTORY_DB_PASSWORD:-inventory-dev-password}@postgres:5432/scalecart_inventory
+    depends_on: { inventory-migrate: { condition: service_completed_successfully }, scalelog: { condition: service_started } }
+
+  notification:
+    <<: *restart
+    build: { context: ., dockerfile: apps/notification/Dockerfile }
+    environment:
+      <<: *service-env
+      NOTIFICATION_DATABASE_URL: postgresql://notification_svc:${NOTIFICATION_DB_PASSWORD:-notification-dev-password}@postgres:5432/scalecart_notification
+    depends_on: { notification-migrate: { condition: service_completed_successfully }, scalelog: { condition: service_started } }
+
+  # ---- the only door from outside
+  gateway:
+    <<: *restart
+    build: { context: ., dockerfile: apps/gateway/Dockerfile }
+    environment:
+      <<: *service-env
+      PORT: 3000
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:4300}
+      TRUST_PROXY: "" # the gateway faces the browser directly: trust no forwarded headers
+    ports:
+      - "3000:3000"
+    depends_on: [identity, catalog, order, payment, inventory, notification]
 
 volumes:
   pgdata:
+  scalelog-data:

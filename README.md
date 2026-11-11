@@ -24,7 +24,8 @@ M6.5 progress and design: `docs/09-real-microservices.md`.
 
 ## Run locally
 
-1. **Database:** PostgreSQL with a database for ScaleCart (or `docker compose up -d` for one on port 5432).
+1. **Database:** a PostgreSQL server (any version 15+). Each service gets its own database on it (step 2).
+   With Docker you can instead run the WHOLE backend as containers: see "Containers" below.
 2. **Backend** (everything from the repo root)
    ```
    npm install                 # ONCE, at the repo root: installs and links every workspace
@@ -56,6 +57,21 @@ M6.5 progress and design: `docs/09-real-microservices.md`.
    ```
 
 Demo admin (from the seed): `admin@scalecart.com` / `Admin@12345`. Register any other account in the UI to get a customer.
+
+## Containers (Docker) and CI
+
+Every app has its own **`apps/<name>/Dockerfile`** (multi-stage: build -> production dependencies only -> a small
+non-root image with `tini` as PID 1 and a health check). Build one from the repo root:
+`docker build -f apps/payment/Dockerfile -t scalecart/payment .`
+
+**`docker-compose.yml`** runs the whole backend as containers: Postgres (an init script creates one database + one
+user per service), ScaleKV, ScaleLog (with a volume), one-shot **migration jobs**, the 6 services (each with ONLY its
+own database credentials, finding the others by container name) and the gateway on port 3000. See the comments at the
+top of the file for the commands.
+
+**`.github/workflows/ci.yml`** on every push: boundary check, type-check and all tests against a real PostgreSQL
+(databases and users created exactly like locally), then builds the image of **only the apps that changed**
+(one parallel job per app; a change in `packages/` rebuilds all of them).
 
 ## Things to try
 - Add products to the cart, check out with the **success** test card, then with the **decline** test card (stock is released, the order shows CANCELLED).

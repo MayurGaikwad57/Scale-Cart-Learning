@@ -1312,7 +1312,7 @@ Use these exact checkpoints.
 * [x] Phase 3: database per service
 * [x] Phase 4: identity service (RS256 + JWKS)
 * [x] Phase 5: catalog service
-* [ ] Phase 6: Dockerfile + CI per service
+* [x] Phase 6: Dockerfile + CI per service (CI runs after push)
 
 ## M7 — Reliability
 

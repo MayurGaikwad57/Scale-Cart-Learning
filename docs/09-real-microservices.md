@@ -70,7 +70,7 @@ while coding) and as compiled JavaScript in production (`tsc -b` builds them fir
 | 3 | **Database per service** — 4 databases + 4 DB users, own Prisma schema + migrations per app, no cross-DB foreign keys, own `processed_events`, `/internal/stock-alerts`, one-time data migration script (old DB kept as a backup) | ✅ see "Phase 3 — what changed" below |
 | 4 | **Identity service** — users/auth out of order, own DB, RS256 + JWKS, gateway routes `/auth` → identity | ✅ see "Phase 4 — what changed" below |
 | 5 | **Catalog service** — products out of order, own DB, `ProductCreated/Updated` + `StockChanged` events, stock copy, cart/checkout call catalog, gateway routes `/products` → catalog | ✅ see "Phase 5 — what changed" below |
-| 6 | **Deploy per service** — Dockerfile per app, `docker-compose.yml`, GitHub Actions per app | CI green for every app |
+| 6 | **Deploy per service** — Dockerfile per app, `docker-compose.yml`, GitHub Actions per app | ✅ see "Phase 6 — what changed" below (CI runs once the branch is pushed) |
 
 ## Phase 2 — what changed
 
@@ -148,6 +148,28 @@ while coding) and as compiled JavaScript in production (`tsc -b` builds them fir
     on every order line - a past order never changes when a product is renamed or re-priced, and showing an
     order no longer needs the catalog.
 - New tests: snapshot survives a rename, checkout uses the current catalog price, catalog-down behaviour.
+
+## Phase 6 — what changed
+
+- **A Dockerfile per app** (`apps/<name>/Dockerfile`, built from the repo root): stage `build` (npm ci on the
+  manifests first for layer caching, then `npm run build -w <app>`), stage `prod-deps` (`npm prune --omit=dev
+  --omit=optional` - Prisma CLI and TypeScript are *optional peers* of `@prisma/client` and survive `--omit=dev`
+  alone; found by simulating the build), stage 3: `node:20.19-alpine` + `tini`, non-root `USER node`, `HEALTHCHECK`,
+  only `dist/` + production `node_modules`. No secrets at build time; all configuration via environment variables.
+- **`docker-compose.yml`**: Postgres with `infra/postgres/init-service-dbs.sh` (one database + one user per service,
+  `CONNECT` revoked from PUBLIC), ScaleKV, ScaleLog with a volume, a one-shot **migration job per service** (the
+  `build` target still has the Prisma CLI; services wait for `service_completed_successfully`), the 6 services with
+  their own credentials and service discovery by container name, and the gateway as the only published port.
+  `TRUST_PROXY=uniquelocal` lets services read the client IP forwarded by the gateway's container.
+- **`.github/workflows/ci.yml`**: `checks` (boundaries, type-check, every test against a Postgres service container),
+  `changes` (`dorny/paths-filter`: which apps changed), `images` (a matrix job per changed app, Buildx with GitHub
+  Actions cache, not pushed). The system tests set their pool size in `vitest.config.ts`, so CI stays under
+  PostgreSQL's 100 connections without a hand-written `.env`.
+- **Verified locally (no Docker on this machine):** the Dockerfile's build steps in an empty folder from the git files
+  only (`npm ci` -> build -> prune -> `node dist/main.js` with environment variables only, against its database);
+  a clean-checkout CI build (install, boundaries, Prisma generate, type-check); Dockerfile keywords / COPY sources /
+  stage names; compose and workflow YAML. **Not verified yet:** an actual `docker build` / `docker compose up` and
+  the first CI run - both happen on GitHub once the branch is pushed.
 
 ## Known gaps (on purpose)
 
