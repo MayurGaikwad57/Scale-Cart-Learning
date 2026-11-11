@@ -31,12 +31,31 @@ export interface RateLimitRule {
   windowMs: number; // ... per window
   /** Who is being limited. Default: the logged-in user, else the client IP. */
   keyBy?: (req: Request) => string;
+  /** For people (the admin pages): "IP address" / "user", and what the rule protects. */
+  per?: string;
+  appliesTo?: string;
 }
 
 const defaultKey = (req: Request) => (req.user ? `user:${req.user.id}` : `ip:${req.ip}`);
+/** Limit per client IP (instead of per logged-in user). */
+export const byIp = (req: Request) => `ip:${req.ip}`;
+
+/**
+ * The rules THIS process enforces. The kit holds only the MECHANISM; every service declares its
+ * OWN rules (its policy) and reports them in /health/ready - so changing the checkout limit is a
+ * change to the order service alone, not to a library every service ships.
+ */
+export const enforcedRules: { name: string; limit: number; window: string; per: string; appliesTo: string }[] = [];
 
 export function rateLimit(rule: RateLimitRule): RequestHandler {
   const keyBy = rule.keyBy ?? defaultKey;
+  enforcedRules.push({
+    name: rule.name,
+    limit: rule.limit,
+    window: rule.windowMs === 60_000 ? "1 minute" : `${rule.windowMs / 1000} seconds`,
+    per: rule.per ?? (rule.keyBy === byIp ? "IP address" : "user"),
+    appliesTo: rule.appliesTo ?? "",
+  });
 
   return async (req, res, next) => {
     if (!kv.isReady) return next(); // fail open
@@ -84,21 +103,3 @@ export function rateLimit(rule: RateLimitRule): RequestHandler {
     next();
   };
 }
-
-const byIp = (req: Request) => `ip:${req.ip}`;
-
-// The rules ScaleCart uses - the ONE place to tune them (the admin System page reads these too).
-export const rules = {
-  // Every API call, per IP: stops one client from flooding the whole API.
-  global: { name: "global", limit: 300, windowMs: 60_000, keyBy: byIp, per: "IP address", appliesTo: "every API request" },
-  // Login/register, per IP: makes password guessing slow. (Try 11 wrong logins in the UI.)
-  auth: { name: "auth", limit: 10, windowMs: 60_000, keyBy: byIp, per: "IP address", appliesTo: "login & register" },
-  // Checkout, per user: placing orders is expensive (DB locks, payment calls).
-  orders: { name: "orders", limit: 10, windowMs: 60_000, per: "user", appliesTo: "placing orders" },
-} satisfies Record<string, RateLimitRule & { per: string; appliesTo: string }>;
-
-export const limits = {
-  global: rateLimit(rules.global),
-  auth: rateLimit(rules.auth),
-  orders: rateLimit(rules.orders),
-};

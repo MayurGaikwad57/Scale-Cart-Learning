@@ -4,6 +4,7 @@ import helmet from "helmet";
 import { broker } from "./broker.js";
 import { runningConsumers, startConsumers, stopConsumers, type ConsumerDef } from "./consumers.js";
 import { kitEnv as env } from "./env.js";
+import { enforcedRules } from "./rate-limit.js";
 import { errorHandler } from "./error-handler.js";
 import { kv } from "./kv.js";
 import type { ServiceName } from "./registry.js";
@@ -54,7 +55,9 @@ export function createServiceApp(name: ServiceName, mount: (app: Express) => voi
     }));
     try {
       await opts.db?.ping();
-      res.json({ status: "ready", service: name, pid: process.pid, uptimeSeconds: Math.round(process.uptime()), kv: kv.status, log: broker.conn.status, consumers });
+      // rateLimits: the rules THIS service enforces (its own policy) - the gateway's /admin/services
+      // collects them from every service for the admin pages.
+      res.json({ status: "ready", service: name, pid: process.pid, uptimeSeconds: Math.round(process.uptime()), kv: kv.status, log: broker.conn.status, consumers, rateLimits: enforcedRules });
     } catch {
       res.status(503).json({ status: "db_unavailable", service: name, pid: process.pid });
     }

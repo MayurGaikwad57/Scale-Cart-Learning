@@ -6,7 +6,7 @@ import { kv } from "@scalecart/service-kit/kv";
 import { GROUPS, groupsOfService } from "@scalecart/events";
 import { authenticate, requireRole } from "@scalecart/service-kit/auth";
 import { errorHandler } from "@scalecart/service-kit/error-handler";
-import { limits } from "@scalecart/service-kit/rate-limit";
+import { byIp, enforcedRules, rateLimit } from "@scalecart/service-kit/rate-limit";
 import { SERVICE_NAMES, serviceUrls, type ServiceName } from "@scalecart/service-kit/registry";
 import { requestContext } from "@scalecart/service-kit/request-context";
 import { proxyStats, proxyTo } from "./proxy.js";
@@ -88,13 +88,14 @@ export function createGatewayApp() {
   // Internal service-to-service routes are never reachable from outside.
   app.use("/internal", (_req, res) => res.status(404).json({ error: "not_found" }));
 
-  app.use(limits.global);
+  // THE GATEWAY's policy: every API call, per IP - stops one client from flooding the whole API.
+  app.use(rateLimit({ name: "global", limit: 300, windowMs: 60_000, keyBy: byIp, appliesTo: "every API request" }));
 
   // Admin > Services: the gateway's own endpoint (it is the one component that sees every service).
   app.get("/admin/services", ...edgeAuth.admin, async (_req, res) => {
     const services = await Promise.all(SERVICE_NAMES.map(probe));
     res.json({
-      gateway: { pid: process.pid, uptimeSeconds: Math.round(process.uptime()), kv: kv.status },
+      gateway: { pid: process.pid, uptimeSeconds: Math.round(process.uptime()), kv: kv.status, rateLimits: enforcedRules },
       services: services.map((s) => {
         const st = proxyStats[s.service];
         return {

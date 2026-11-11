@@ -109,6 +109,9 @@ describe("API gateway", () => {
     const byName = Object.fromEntries(res.body.services.map((s: { service: string }) => [s.service, s]));
     expect(Object.keys(byName).sort()).toEqual(["catalog", "identity", "inventory", "notification", "order", "payment"]);
     expect(byName.catalog.routes).toEqual(expect.arrayContaining(["/products", "/admin/system"])); // M6.5 phase 5
+    // Each service enforces and REPORTS its own rate limits; the gateway collects them (refactor B2).
+    expect(res.body.gateway.rateLimits.map((r: { name: string }) => r.name)).toContain("global");
+    expect(byName.order.rateLimits.map((r: { name: string }) => r.name)).toContain("orders");
     expect(byName.identity.routes).toEqual(["/auth"]); // M6.5: login moved out of the order service
     expect(byName.payment).toMatchObject({ up: true, status: "ready" });
     expect(byName.payment.groups.map((g: { group: string }) => g.group)).toEqual(["payment"]);
