@@ -112,7 +112,15 @@ export interface SystemStatus {
     } | null;
   };
   cache: { hits: number; misses: number; bypass: number; hitRatePercent: number; productTtlSeconds: number; listTtlSeconds: number; categoriesTtlSeconds: number; notFoundTtlSeconds: number };
-  rateLimits: { name: string; limit: number; window: string; per: string; appliesTo: string }[];
+}
+
+/** A rate-limit rule as a service reports it (each service enforces - and reports - its OWN rules). */
+export interface RateLimitRule {
+  name: string;
+  limit: number;
+  window: string;
+  per: string;
+  appliesTo: string;
 }
 
 /** M5: written asynchronously by the "notification" consumer group. */
@@ -128,6 +136,8 @@ export interface AppNotification {
 /** GET /admin/events - a look inside ScaleLog (our own Kafka). */
 export interface EventsOverview {
   broker: { status: KvStatus; url: string | null };
+  /** The consumer-group DIRECTORY from the event contracts (packages/events): who reads what. */
+  groups: { group: string; topic: string; service: string; description: string }[];
   cluster: {
     topics: { name: string; partitions: { partition: number; endOffset: number }[] }[];
     groups: {
@@ -180,13 +190,14 @@ export interface ServiceStatus {
   kv?: KvStatus;
   log?: KvStatus;
   consumers?: ServiceConsumer[];
+  rateLimits?: RateLimitRule[];
   routes: string[];
   groups: { group: string; topic: string; description: string }[];
   traffic: { requests: number; errors: number; unavailable: number; inFlight: number; avgMs: number; lastError: string | null };
 }
 
 export interface ServicesOverview {
-  gateway: { pid: number; uptimeSeconds: number; kv: KvStatus };
+  gateway: { pid: number; uptimeSeconds: number; kv: KvStatus; rateLimits?: RateLimitRule[] };
   services: ServiceStatus[];
 }
 

@@ -2,7 +2,6 @@ import { Router } from "express";
 import { kv } from "@scalecart/service-kit/kv";
 import { cacheStats } from "@scalecart/service-kit/cache";
 import { authenticate, requireRole } from "@scalecart/service-kit/auth";
-import { rules } from "@scalecart/service-kit/rate-limit";
 import { CATEGORIES_TTL_MS, LIST_TTL_MS, NOT_FOUND_TTL_MS, PRODUCT_TTL_MS } from "../products/products.cache.js";
 
 // Admin-only look under the hood: is ScaleKV up, and how well is the cache doing?
@@ -43,12 +42,5 @@ systemRouter.get("/", async (_req, res) => {
       categoriesTtlSeconds: CATEGORIES_TTL_MS / 1000,
       notFoundTtlSeconds: NOT_FOUND_TTL_MS / 1000,
     },
-    rateLimits: Object.values(rules).map((r) => ({
-      name: r.name,
-      limit: r.limit,
-      window: r.windowMs === 60_000 ? "1 minute" : `${r.windowMs / 1000} seconds`,
-      per: r.per,
-      appliesTo: r.appliesTo,
-    })),
   });
 });

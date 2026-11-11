@@ -1,7 +1,9 @@
 import { prisma } from "./config/prisma.js";
 import { ORDERS_TOPIC } from "@scalecart/events";
 import { publishEvent } from "./events/publish.js";
-import { orderEvents, ordersService, reserveStock } from "./modules/orders/orders.service.js";
+import { reserveStock } from "./clients/inventory.client.js";
+import { orderEvents } from "./modules/orders/order.mapping.js";
+import { ordersService } from "./modules/orders/orders.service.js";
 
 /**
  * THE RECONCILER - a safety net for orders stuck in PENDING.

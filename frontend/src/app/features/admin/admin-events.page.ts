@@ -11,17 +11,6 @@ import { Icon } from '../../shared/components/icon';
 import { MoneyPipe } from '../../shared/pipes/money.pipe';
 
 const REFRESH_MS = 3000;
-// Every group belongs to a SERVICE and reads one topic (the directory: packages/events/src/index.ts).
-const GROUPS = ['payment', 'order', 'inventory', 'notification', 'analytics', 'product_stock', 'product_sync'] as const;
-const GROUP_INFO: Record<string, { text: string; service: string; topic: string }> = {
-  payment: { text: 'Charges the card for every new order', service: 'payment', topic: 'orders' },
-  order: { text: 'Confirms or cancels the order from the payment result', service: 'order', topic: 'payments' },
-  inventory: { text: 'Sells or releases the reserved stock; low-stock alerts', service: 'inventory', topic: 'orders' },
-  notification: { text: 'Tells the customer: the bell in the navbar', service: 'notification', topic: 'orders' },
-  analytics: { text: 'Builds the daily sales report below', service: 'order', topic: 'orders' },
-  product_stock: { text: "Keeps the catalog's copy of the stock up to date (StockChanged)", service: 'catalog', topic: 'inventory' },
-  product_sync: { text: 'Creates the stock row of a new product; copies sku + name (ProductCreated/Updated)', service: 'inventory', topic: 'products' },
-};
 
 interface Snapshot {
   overview: EventsOverview;
@@ -42,7 +31,7 @@ interface Snapshot {
       <div>
         <div class="sc-eyebrow">Admin</div>
         <h1 class="sc-page-title">Events</h1>
-        <p class="sc-muted mb-0">An order travels as events: <code>OrderCreated</code> → <code>PaymentSucceeded</code>/<code>PaymentFailed</code> → <code>OrderConfirmed</code>/<code>OrderCancelled</code>. Seven consumer groups in five services react independently.</p>
+        <p class="sc-muted mb-0">An order travels as events: <code>OrderCreated</code> → <code>PaymentSucceeded</code>/<code>PaymentFailed</code> → <code>OrderConfirmed</code>/<code>OrderCancelled</code>. Every consumer group (listed below, from the event contracts) reacts independently.</p>
       </div>
       <div class="d-flex flex-wrap gap-2">
         <a routerLink="/admin/services" class="sc-btn sc-btn-soft"><app-icon name="layers" [size]="18" /> Services</a>
@@ -117,7 +106,8 @@ interface Snapshot {
 
         <!-- Consumer groups -->
         <div class="row g-4 mb-4">
-          @for (name of groups; track name) {
+          @for (info of d.overview.groups; track info.group) {
+            @let name = info.group;
             @let g = group(c, name);
             @let dlq = d.dlq[name];
             <div class="col-lg-4">
@@ -125,10 +115,10 @@ interface Snapshot {
                 <div class="d-flex justify-content-between align-items-start gap-2">
                   <div>
                     <h2 class="h6 mb-0">{{ name }}</h2>
-                    <div class="sc-muted small">{{ info[name].text }}</div>
+                    <div class="sc-muted small">{{ info.description }}</div>
                     <div class="d-flex gap-1 mt-1">
-                      <span class="sc-chip-sm" title="The service that runs this consumer group">{{ info[name].service }} service</span>
-                      <span class="sc-chip-sm" title="The topic it reads">topic {{ info[name].topic }}</span>
+                      <span class="sc-chip-sm" title="The service that runs this consumer group">{{ info.service }} service</span>
+                      <span class="sc-chip-sm" title="The topic it reads">topic {{ info.topic }}</span>
                     </div>
                   </div>
                   <span class="sc-pill text-nowrap flex-shrink-0" [class]="totalLag(g) === 0 ? 'sc-pill-success' : 'sc-pill-warn'" [attr.data-testid]="'lag-' + name">lag {{ totalLag(g) }}</span>
@@ -271,8 +261,6 @@ interface Snapshot {
 export class AdminEventsPage {
   private readonly events = inject(EventsService);
   private readonly toast = inject(ToastService);
-  protected readonly groups = GROUPS;
-  protected readonly info = GROUP_INFO;
   protected readonly error = signal<string | null>(null);
   protected readonly busy = signal(false);
 
@@ -285,8 +273,8 @@ export class AdminEventsPage {
               projections: this.events.projections(),
               // DLQs can only be read while the broker is up.
               dlq: overview.broker.status === 'ready'
-                ? forkJoin(Object.fromEntries(GROUPS.map((g) => [g, this.events.dlq(g).pipe(catchError(() => of(null)))])))
-                : of(Object.fromEntries(GROUPS.map((g) => [g, null]))),
+                ? forkJoin(Object.fromEntries(overview.groups.map((g) => [g.group, this.events.dlq(g.group).pipe(catchError(() => of(null)))])))
+                : of(Object.fromEntries(overview.groups.map((g) => [g.group, null]))),
             }).pipe(map((rest) => ({ overview, ...rest }) as Snapshot)),
           ),
           tap(() => this.error.set(null)),
@@ -332,7 +320,8 @@ export class AdminEventsPage {
     this.busy.set(true);
     this.events.replay(group).subscribe({
       next: (r) => {
-        this.toast.show(`${r.replayed} event(s) put back on the "${GROUP_INFO[group]?.topic ?? 'orders'}" topic`);
+        const topic = this.data()?.overview.groups.find((g) => g.group === group)?.topic ?? 'its';
+        this.toast.show(`${r.replayed} event(s) put back on the "${topic}" topic`);
         this.busy.set(false);
       },
       error: (e) => {
