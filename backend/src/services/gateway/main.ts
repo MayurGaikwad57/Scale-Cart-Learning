@@ -1,6 +1,6 @@
 import { env } from "../../config/env.js";
-import { kv } from "../../config/kv.js";
-import { serviceUrls } from "../registry.js";
+import { kv } from "@scalecart/service-kit/kv";
+import { serviceUrls } from "@scalecart/service-kit/registry";
 import { createGatewayApp } from "./app.js";
 
 // npm run svc:gateway. The gateway has no database: it only needs ScaleKV for the shared rate limit.

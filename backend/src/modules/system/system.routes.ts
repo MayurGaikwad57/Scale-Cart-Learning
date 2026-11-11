@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { kv } from "../../config/kv.js";
-import { cacheStats } from "../../lib/cache.js";
-import { authenticate, requireRole } from "../../middleware/auth.js";
-import { rules } from "../../middleware/rateLimit.js";
+import { kv } from "@scalecart/service-kit/kv";
+import { cacheStats } from "@scalecart/service-kit/cache";
+import { authenticate, requireRole } from "@scalecart/service-kit/auth";
+import { rules } from "@scalecart/service-kit/rate-limit";
 import { CATEGORIES_TTL_MS, LIST_TTL_MS, NOT_FOUND_TTL_MS, PRODUCT_TTL_MS } from "../products/products.cache.js";
 
 // Admin-only look under the hood: is ScaleKV up, and how well is the cache doing?

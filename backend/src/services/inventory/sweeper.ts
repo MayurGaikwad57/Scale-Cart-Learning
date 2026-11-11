@@ -1,5 +1,5 @@
 import { prisma } from "../../config/prisma.js";
-import { callService, ServiceCallError } from "../shared/http-client.js";
+import { callService, ServiceCallError } from "@scalecart/service-kit/http-client";
 import { reservations } from "./reservations.js";
 
 /**

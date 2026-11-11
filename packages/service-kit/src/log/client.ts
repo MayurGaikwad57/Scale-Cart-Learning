@@ -1,7 +1,13 @@
 import { KvClient, KvCommandError } from "../kv/client.js";
-import type { LogRecord } from "./storage.js";
 
-export type { LogRecord };
+/** One record in a partition (the broker stores these; consumers receive them). */
+export interface LogRecord {
+  offset: number;
+  timestamp: number;
+  key: string;
+  value: string;
+  headers: Record<string, string>;
+}
 
 export interface Assignment {
   generation: number;

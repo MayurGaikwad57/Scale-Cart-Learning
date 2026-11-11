@@ -48,7 +48,7 @@ const tsxCli = compiled ? "" : fileURLToPath(import.meta.resolve("tsx/cli"));
 const argsFor = (p: { file: string; watch: boolean }) =>
   compiled
     ? [`dist/${p.file.replace(/\.ts$/, ".js")}`]
-    : [tsxCli, ...(p.watch ? ["watch", "--clear-screen=false"] : []), p.file];
+    : [tsxCli, ...(p.watch ? ["watch", "--clear-screen=false"] : []), "--conditions=development", p.file];
 const width = Math.max(...names.map((n) => n.length));
 const children: ChildProcess[] = [];
 

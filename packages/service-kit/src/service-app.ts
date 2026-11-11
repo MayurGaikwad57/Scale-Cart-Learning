@@ -1,21 +1,29 @@
 import type { Server } from "node:http";
 import express, { type Express } from "express";
 import helmet from "helmet";
-import { broker } from "../../config/broker.js";
-import { env } from "../../config/env.js";
-import { kv } from "../../config/kv.js";
-import { prisma } from "../../config/prisma.js";
-import { GROUPS, runningConsumers, startWorkers, stopWorkers, type ConsumerGroup } from "../../events/workers.js";
-import { errorHandler } from "../../middleware/errorHandler.js";
-import type { ServiceName } from "../registry.js";
+import { broker } from "./broker.js";
+import { runningConsumers, startConsumers, stopConsumers, type ConsumerDef } from "./consumers.js";
+import { kitEnv as env } from "./env.js";
+import { errorHandler } from "./error-handler.js";
+import { kv } from "./kv.js";
+import type { ServiceName } from "./registry.js";
 import { requestContext } from "./request-context.js";
 
 /**
- * The skeleton every ScaleCart service shares (a "service template" / "chassis"). Each service only
- * adds its own routes; health checks, request ids, JSON errors and graceful shutdown are identical,
- * so operating five services feels like operating one.
+ * The skeleton every ScaleCart service shares (a "service template" / MICROSERVICE CHASSIS). Each
+ * service only adds its own routes; health checks, request ids, JSON errors and graceful shutdown
+ * are identical, so operating many services feels like operating one.
+ *
+ * The chassis knows nothing about any service's database or events: the service PASSES IN its
+ * database (for the readiness check and shutdown) and its consumer groups.
  */
-export function createServiceApp(name: ServiceName, mount: (app: Express) => void): Express {
+export interface ServiceDb {
+  /** Throws if the database can't be reached (e.g. SELECT 1). */
+  ping: () => Promise<unknown>;
+  disconnect: () => Promise<void>;
+}
+
+export function createServiceApp(name: ServiceName, mount: (app: Express) => void, opts: { db?: ServiceDb } = {}): Express {
   const app = express();
   // Requests arrive THROUGH THE GATEWAY, so the TCP peer is the gateway, not the customer. Trusting
   // X-Forwarded-For from loopback lets req.ip be the customer's real address again - the per-IP
@@ -26,8 +34,8 @@ export function createServiceApp(name: ServiceName, mount: (app: Express) => voi
   app.use(requestContext);
   app.use(express.json());
 
-  // Liveness: the process is up. Readiness: it can do its job (database reachable). The gateway's
-  // admin page polls /health/ready of every service.
+  // Liveness: the process is up. Readiness: it can do its job (its database reachable). The
+  // gateway's admin page polls /health/ready of every service.
   app.get("/health", (_req, res) => res.json({ status: "ok", service: name }));
   app.get("/health/ready", async (_req, res) => {
     const consumers = runningConsumers.map((c) => ({
@@ -39,7 +47,7 @@ export function createServiceApp(name: ServiceName, mount: (app: Express) => voi
       ...c.metrics,
     }));
     try {
-      await prisma.$queryRaw`SELECT 1`;
+      await opts.db?.ping();
       res.json({ status: "ready", service: name, pid: process.pid, uptimeSeconds: Math.round(process.uptime()), kv: kv.status, log: broker.conn.status, consumers });
     } catch {
       res.status(503).json({ status: "db_unavailable", service: name, pid: process.pid });
@@ -55,13 +63,14 @@ export function createServiceApp(name: ServiceName, mount: (app: Express) => voi
 
 /**
  * Start a service process: connect to ScaleKV and ScaleLog (both optional), start the consumer
- * groups this service owns, listen, and shut down gracefully on Ctrl+C.
+ * groups this service owns, listen, and shut down gracefully on Ctrl+C / SIGTERM.
  */
 export function runService(opts: {
   name: ServiceName;
   port: number;
   app: Express;
-  groups?: readonly ConsumerGroup[];
+  db?: ServiceDb;
+  consumers?: readonly ConsumerDef[];
   onStart?: () => void;
   onStop?: () => void | Promise<void>;
 }): Server {
@@ -70,9 +79,9 @@ export function runService(opts: {
   else console.log(`${tag} KV_URL not set - running without ScaleKV`);
   if (env.LOG_URL) {
     broker.conn.connect(env.LOG_URL);
-    if (opts.groups?.length && env.RUN_WORKERS === "true") {
-      startWorkers(opts.groups);
-      console.log(`${tag} consumer groups: ${opts.groups.map((g) => `${g} (${GROUPS[g].topic})`).join(", ")}`);
+    if (opts.consumers?.length && env.RUN_WORKERS === "true") {
+      startConsumers(opts.consumers);
+      console.log(`${tag} consumer groups: ${opts.consumers.map((c) => `${c.group} (${c.topic})`).join(", ")}`);
     }
   } else {
     console.log(`${tag} LOG_URL not set - running without events`);
@@ -83,16 +92,16 @@ export function runService(opts: {
     opts.onStart?.();
   });
 
-  // Graceful shutdown: stop accepting requests, let consumers LEAVE their groups (instant
-  // rebalance instead of a 10s heartbeat timeout), close connections.
+  // Graceful shutdown: stop accepting requests, stop our own jobs, let consumers LEAVE their
+  // groups (instant rebalance instead of a 10s heartbeat timeout), close the database.
   let stopping = false;
   const shutdown = async () => {
     if (stopping) return;
     stopping = true;
     server.close();
     await opts.onStop?.();
-    await stopWorkers();
-    await prisma.$disconnect();
+    await stopConsumers();
+    await opts.db?.disconnect();
     process.exit(0);
   };
   process.on("SIGINT", shutdown);

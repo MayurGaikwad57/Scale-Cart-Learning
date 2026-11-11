@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { prisma } from "../../config/prisma.js";
-import { notFound } from "../../utils/errors.js";
+import { notFound } from "@scalecart/service-kit/errors";
 import { invalidateProducts } from "../products/products.cache.js";
-import { uuid } from "../../utils/validation.js";
+import { uuid } from "@scalecart/service-kit/validation";
 
 export const setStockSchema = z.object({
   productId: uuid,

@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { authenticate } from "../../middleware/auth.js";
-import { limits } from "../../middleware/rateLimit.js";
-import { validateBody } from "../../middleware/validate.js";
+import { authenticate } from "@scalecart/service-kit/auth";
+import { limits } from "@scalecart/service-kit/rate-limit";
+import { validateBody } from "@scalecart/service-kit/validate";
 import { usersController } from "./users.controller.js";
 import { loginSchema, registerSchema } from "./users.validation.js";
 

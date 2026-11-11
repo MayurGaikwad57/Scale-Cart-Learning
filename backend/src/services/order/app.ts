@@ -6,10 +6,10 @@ import { systemRouter } from "../../modules/system/system.routes.js";
 import { authRouter } from "../../modules/users/users.routes.js";
 import { Router } from "express";
 import { z } from "zod";
-import { prisma } from "../../config/prisma.js";
-import { uuid } from "../../utils/validation.js";
-import { requireInternal } from "../shared/internal-auth.js";
-import { createServiceApp } from "../shared/service-app.js";
+import { db, prisma } from "../../config/prisma.js";
+import { uuid } from "@scalecart/service-kit/validation";
+import { requireInternal } from "@scalecart/service-kit/internal-auth";
+import { createServiceApp } from "@scalecart/service-kit/service-app";
 
 /**
  * Internal API for other services. The inventory service's SWEEPER asks "what happened to this
@@ -41,4 +41,4 @@ export const createOrderApp = () =>
     app.use("/admin/system", systemRouter);
     app.use("/admin/events", eventsRouter);
     app.use("/internal", internal);
-  });
+  }, { db });

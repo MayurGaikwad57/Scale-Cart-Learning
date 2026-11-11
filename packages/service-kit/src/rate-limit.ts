@@ -1,6 +1,6 @@
 import type { Request, RequestHandler } from "express";
-import { kv } from "../config/kv.js";
-import { HttpError } from "../utils/errors.js";
+import { kv } from "./kv.js";
+import { HttpError } from "./errors.js";
 
 /**
  * Distributed rate limiting with the SLIDING WINDOW COUNTER algorithm, stored in ScaleKV so

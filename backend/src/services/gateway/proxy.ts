@@ -1,6 +1,6 @@
 import http from "node:http";
 import type { Request, RequestHandler } from "express";
-import { serviceUrls, type ServiceName } from "../registry.js";
+import { serviceUrls, type ServiceName } from "@scalecart/service-kit/registry";
 
 /**
  * A REVERSE PROXY in ~80 lines - what nginx / Envoy / Kong / AWS API Gateway do at their core.

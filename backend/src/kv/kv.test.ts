@@ -1,7 +1,7 @@
 import net from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { KvClient, KvCommandError, KvUnavailableError } from "./client.js";
-import { encode, encodeCommand, RespError, RespParser, SimpleString } from "./resp.js";
+import { KvClient, KvCommandError, KvUnavailableError } from "@scalecart/service-kit/kv/client";
+import { encode, encodeCommand, RespError, RespParser, SimpleString } from "@scalecart/service-kit/kv/resp";
 import { startKvServer, type RunningKvServer } from "./server.js";
 import { KvStore } from "./store.js";
 

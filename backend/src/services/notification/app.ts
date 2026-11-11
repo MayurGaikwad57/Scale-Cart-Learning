@@ -1,5 +1,6 @@
+import { db } from "../../config/prisma.js";
 import { notificationsRouter } from "../../modules/notifications/notifications.routes.js";
-import { createServiceApp } from "../shared/service-app.js";
+import { createServiceApp } from "@scalecart/service-kit/service-app";
 
 /**
  * NOTIFICATION SERVICE (:3004). Writes notifications from order events (the "notification"
@@ -13,4 +14,4 @@ import { createServiceApp } from "../shared/service-app.js";
 export const createNotificationApp = () =>
   createServiceApp("notification", (app) => {
     app.use("/notifications", notificationsRouter);
-  });
+  }, { db });

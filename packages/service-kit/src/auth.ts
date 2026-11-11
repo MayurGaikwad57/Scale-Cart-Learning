@@ -1,7 +1,7 @@
 import type { RequestHandler } from "express";
 import jwt from "jsonwebtoken";
-import { env } from "../config/env.js";
-import { forbidden, unauthorized } from "../utils/errors.js";
+import { kitEnv as env } from "./env.js";
+import { forbidden, unauthorized } from "./errors.js";
 
 export type Role = "CUSTOMER" | "ADMIN";
 export interface AuthUser {

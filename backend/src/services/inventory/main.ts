@@ -1,6 +1,7 @@
 import { env } from "../../config/env.js";
-import { groupsOfService } from "../../events/workers.js";
-import { runService } from "../shared/service-app.js";
+import { db } from "../../config/prisma.js";
+import { consumersOf, groupsOfService } from "../../events/workers.js";
+import { runService } from "@scalecart/service-kit/service-app";
 import { createInventoryApp } from "./app.js";
 import { startSweeper, stopSweeper } from "./sweeper.js";
 
@@ -9,7 +10,7 @@ runService({
   name: "inventory",
   port: env.INVENTORY_PORT,
   app: createInventoryApp(),
-  groups: groupsOfService("inventory"),
+  db, consumers: consumersOf(groupsOfService("inventory")),
   onStart: startSweeper, // repairs reservations left HELD by lost events
   onStop: stopSweeper,
 });

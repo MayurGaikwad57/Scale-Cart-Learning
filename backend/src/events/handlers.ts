@@ -1,6 +1,6 @@
 import { Prisma } from "../../generated/prisma/client.js";
 import { prisma } from "../config/prisma.js";
-import type { OrderEvent } from "./order-events.js";
+import type { OrderEvent } from "@scalecart/events";
 
 /**
  * Consumer handlers that live in more than one service, plus once(). Every consumer group receives

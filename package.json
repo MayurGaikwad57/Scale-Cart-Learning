@@ -1,0 +1,9 @@
+{
+  "name": "scalecart",
+  "private": true,
+  "description": "ScaleCart monorepo: deployable apps + small shared packages (npm workspaces)",
+  "workspaces": [
+    "packages/*",
+    "backend"
+  ]
+}

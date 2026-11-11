@@ -1,5 +1,5 @@
 import net from "node:net";
-import { encode, OK, ProtocolError, RespError, RespParser, type Reply } from "./resp.js";
+import { encode, OK, ProtocolError, RespError, RespParser, type Reply } from "@scalecart/service-kit/kv/resp";
 
 /**
  * A generic RESP-over-TCP server: accepts connections, parses commands, calls `execute`, and

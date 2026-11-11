@@ -1,4 +1,5 @@
-import { makeEvent, PAYMENTS_TOPIC, publishEvent, type OrderEvent, type PaymentFailed, type PaymentSucceeded } from "../../events/order-events.js";
+import { makeEvent, PAYMENTS_TOPIC, type OrderEvent, type PaymentFailed, type PaymentSucceeded } from "@scalecart/events";
+import { publishEvent } from "../../events/publish.js";
 import { failureReason, paymentsService } from "../../modules/payments/payments.service.js";
 
 /**

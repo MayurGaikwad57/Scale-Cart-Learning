@@ -9,15 +9,21 @@ See `project-plan.md` for the roadmap and `docs/` for design decisions.
 - `backend/src/kv/` **ScaleKV**, our own Redis-like key-value store (Node, speaks the real Redis protocol). No Redis install needed.
 - `backend/src/log/` **ScaleLog**, our own Kafka-like event log (topics, partitions, consumer groups, offsets, DLQ). No Kafka install needed.
 - `backend/src/services/` the **microservices** (M6): `gateway` :3000, `order` :3001, `payment` :3002, `inventory` :3003, `notification` :3004.
+- `packages/service-kit` the **microservice chassis** every service shares (M6.5): Express skeleton, health checks, request ids, errors, auth, service calls, ScaleKV/ScaleLog clients, consumer runtime.
+- `packages/events` the **event contracts** between services (topics, event types, event ids).
+
+The repo is an **npm workspaces monorepo** (root `package.json`): one `npm install` at the root links the shared
+packages into every app. M6.5 is turning every service into its own app with its own database — see
+`docs/09-real-microservices.md`.
 
 ## Run locally
 
 1. **Database:** PostgreSQL with a database for ScaleCart (or `docker compose up -d` for one on port 5432).
 2. **Backend** (API gateway on port 3000)
    ```
+   npm install                 # ONCE, at the repo root: installs every workspace (backend + packages)
    cd backend
    cp .env.example .env        # then set DATABASE_URL
-   npm install
    npx prisma migrate deploy   # create the tables
    npm run seed                # admin account + 14 sample products
    npm run dev                 # starts EVERYTHING: ScaleKV, ScaleLog, the 4 services and the gateway

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { kv } from "../config/kv.js";
-import { HttpError } from "../utils/errors.js";
+import { kv } from "./kv.js";
+import { HttpError } from "./errors.js";
 
 /**
  * IDEMPOTENCY: "doing it twice has the same effect as doing it once".

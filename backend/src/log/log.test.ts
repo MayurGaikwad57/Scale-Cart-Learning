@@ -2,11 +2,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { KvClient, KvCommandError } from "../kv/client.js";
-import { RespError } from "../kv/resp.js";
+import { KvClient, KvCommandError } from "@scalecart/service-kit/kv/client";
+import { RespError } from "@scalecart/service-kit/kv/resp";
 import { Broker, hashKey } from "./broker.js";
-import { LogClient } from "./client.js";
-import { Consumer } from "./consumer.js";
+import { LogClient } from "@scalecart/service-kit/log/client";
+import { Consumer } from "@scalecart/service-kit/log/consumer";
 import { startLogServer, type RunningLogServer } from "./server.js";
 import { PartitionLog } from "./storage.js";
 

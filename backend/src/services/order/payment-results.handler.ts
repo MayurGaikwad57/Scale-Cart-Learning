@@ -1,4 +1,5 @@
-import { ORDERS_TOPIC, publishEvent, type PaymentEvent } from "../../events/order-events.js";
+import { ORDERS_TOPIC, type PaymentEvent } from "@scalecart/events";
+import { publishEvent } from "../../events/publish.js";
 import { orderEvents, ordersService } from "../../modules/orders/orders.service.js";
 
 /**

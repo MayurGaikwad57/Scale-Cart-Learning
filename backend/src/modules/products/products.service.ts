@@ -1,5 +1,5 @@
-import { cached, countBypass, type Cached } from "../../lib/cache.js";
-import { conflict, notFound } from "../../utils/errors.js";
+import { cached, countBypass, type Cached } from "@scalecart/service-kit/cache";
+import { conflict, notFound } from "@scalecart/service-kit/errors";
 import {
   CATEGORIES_TTL_MS,
   catalogVersion,

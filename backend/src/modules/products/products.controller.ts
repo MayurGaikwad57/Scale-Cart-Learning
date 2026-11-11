@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
-import type { Cached } from "../../lib/cache.js";
-import { idParams } from "../../utils/validation.js";
+import type { Cached } from "@scalecart/service-kit/cache";
+import { idParams } from "@scalecart/service-kit/validation";
 import { productsService } from "./products.service.js";
 import { listQuerySchema } from "./products.validation.js";
 

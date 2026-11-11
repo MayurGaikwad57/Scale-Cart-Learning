@@ -1,13 +1,14 @@
 import { Router } from "express";
 import { z } from "zod";
-import { broker } from "../../config/broker.js";
-import { kv } from "../../config/kv.js";
+import { broker } from "@scalecart/service-kit/broker";
+import { kv } from "@scalecart/service-kit/kv";
 import { prisma } from "../../config/prisma.js";
-import { publisherStats } from "../../events/order-events.js";
-import { chaosKey, CONSUMER_GROUPS, dlqTopicOf, GROUPS, runningConsumers, type ConsumerGroup } from "../../events/workers.js";
-import { authenticate, requireRole } from "../../middleware/auth.js";
-import { validateBody } from "../../middleware/validate.js";
-import { HttpError } from "../../utils/errors.js";
+import { publisherStats } from "@scalecart/service-kit/publisher";
+import { chaosKey, runningConsumers } from "@scalecart/service-kit/consumers";
+import { CONSUMER_GROUPS, dlqTopicOf, GROUPS, type ConsumerGroup } from "../../events/workers.js";
+import { authenticate, requireRole } from "@scalecart/service-kit/auth";
+import { validateBody } from "@scalecart/service-kit/validate";
+import { HttpError } from "@scalecart/service-kit/errors";
 
 /** Admin > Events: look inside ScaleLog, flip the chaos switch, inspect and replay the DLQ. */
 export const eventsRouter = Router();

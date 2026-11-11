@@ -10,8 +10,8 @@
  */
 import "dotenv/config";
 import readline from "node:readline";
-import { KvClient } from "./client.js";
-import { RespError, SimpleString, type Reply } from "./resp.js";
+import { KvClient } from "@scalecart/service-kit/kv/client";
+import { RespError, SimpleString, type Reply } from "@scalecart/service-kit/kv/resp";
 
 const useLog = process.argv.includes("--log");
 const url = useLog

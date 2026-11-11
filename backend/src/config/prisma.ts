@@ -6,3 +6,9 @@ import { env } from "./env.js";
 export const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: env.DATABASE_URL }),
 });
+
+/** What the service chassis needs: a readiness probe and a clean disconnect on shutdown. */
+export const db = {
+  ping: () => prisma.$queryRaw`SELECT 1`,
+  disconnect: () => prisma.$disconnect(),
+};

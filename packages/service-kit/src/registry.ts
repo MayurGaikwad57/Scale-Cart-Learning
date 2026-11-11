@@ -1,4 +1,4 @@
-import { env } from "../config/env.js";
+import { kitEnv as env } from "./env.js";
 
 /**
  * SERVICE REGISTRY: the one place that knows which services exist and where they live.

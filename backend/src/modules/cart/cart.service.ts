@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { prisma } from "../../config/prisma.js";
-import { conflict, notFound } from "../../utils/errors.js";
-import { uuid } from "../../utils/validation.js";
+import { conflict, notFound } from "@scalecart/service-kit/errors";
+import { uuid } from "@scalecart/service-kit/validation";
 
 const MAX_QTY_PER_ITEM = 99;
 const quantity = z.number().int().min(1).max(MAX_QTY_PER_ITEM);

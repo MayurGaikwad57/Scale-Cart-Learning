@@ -1,10 +1,7 @@
-import { broker } from "../config/broker.js";
-import { kv } from "../config/kv.js";
-import { Consumer } from "../log/consumer.js";
-import type { ServiceName } from "../services/registry.js";
-import { withRequestId } from "../services/shared/request-context.js";
+import { ORDERS_TOPIC, PAYMENTS_TOPIC, TOPIC_PARTITIONS, type AnyEvent } from "@scalecart/events";
+import { startConsumers, stopConsumers, type ConsumerDef } from "@scalecart/service-kit/consumers";
+import type { ServiceName } from "@scalecart/service-kit/registry";
 import { analyticsHandler, notificationHandler } from "./handlers.js";
-import { ORDERS_TOPIC, PAYMENTS_TOPIC, TOPIC_PARTITIONS, type AnyEvent, type OrderEvent, type PaymentEvent } from "./order-events.js";
 
 /**
  * EVERY CONSUMER GROUP, which topic it reads, and which SERVICE runs it.
@@ -57,43 +54,18 @@ export const GROUPS: Record<ConsumerGroup, { topic: string; service: ServiceName
 export const groupsOfService = (service: ServiceName) => CONSUMER_GROUPS.filter((g) => GROUPS[g].service === service);
 export const dlqTopicOf = (group: ConsumerGroup) => `${GROUPS[group].topic}.${group}.dlq`;
 
-/**
- * CHAOS SWITCH (admin > Events): makes one consumer group fail on purpose, to watch
- * retry -> DLQ -> replay happen for real. Stored in ScaleKV so every service process sees it.
- */
-export const chaosKey = (group: string) => `chaos:fail:${group}`;
-async function chaosOn(group: string) {
-  if (!kv.isReady) return false;
-  return (await kv.get(chaosKey(group)).catch(() => null)) !== null;
-}
+/** The groups as the kit's consumer runtime wants them. */
+export const consumersOf = (groups: readonly ConsumerGroup[]): ConsumerDef[] =>
+  groups.map((group) => ({
+    group,
+    topic: GROUPS[group].topic,
+    partitions: TOPIC_PARTITIONS,
+    description: GROUPS[group].description,
+    handler: GROUPS[group].handler as ConsumerDef["handler"],
+  }));
 
-/** Consumers running in THIS process. */
-export const runningConsumers: Consumer[] = [];
+/** Start the given groups in THIS process (a service starts its own; tests and `npm run worker` pick). */
+export const startWorkers = (groups: readonly ConsumerGroup[] = CONSUMER_GROUPS, opts: { log?: boolean } = {}) =>
+  startConsumers(consumersOf(groups), opts);
 
-export function startWorkers(groups: readonly ConsumerGroup[] = CONSUMER_GROUPS, opts: { log?: boolean } = {}) {
-  for (const group of groups) {
-    const def = GROUPS[group];
-    let handler: Handler | undefined;
-    const consumer = new Consumer({
-      client: broker,
-      group,
-      topic: def.topic,
-      topicPartitions: TOPIC_PARTITIONS,
-      log: opts.log ?? true,
-      handle: async (value, meta) => {
-        if (await chaosOn(group)) throw new Error(`Simulated failure: chaos switch is ON for "${group}"`);
-        handler ??= await def.handler();
-        // The request id travelled inside the event headers: logs and onward HTTP calls / events
-        // made while handling it carry the SAME id as the click that started it all.
-        await withRequestId(meta.headers["x-request-id"], () => handler!(value as OrderEvent | PaymentEvent));
-      },
-    });
-    consumer.start();
-    runningConsumers.push(consumer);
-  }
-  return runningConsumers;
-}
-
-export async function stopWorkers() {
-  await Promise.all(runningConsumers.splice(0).map((c) => c.stop()));
-}
+export const stopWorkers = stopConsumers;

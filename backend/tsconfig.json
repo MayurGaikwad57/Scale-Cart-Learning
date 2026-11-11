@@ -1,13 +1,10 @@
 {
+  "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
     "outDir": "dist",
     "rootDir": ".",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true
+    "declaration": false
   },
-  "include": ["src", "generated", "prisma.config.ts"]
+  "include": ["src", "generated", "prisma.config.ts"],
+  "references": [{ "path": "../packages/service-kit" }, { "path": "../packages/events" }]
 }

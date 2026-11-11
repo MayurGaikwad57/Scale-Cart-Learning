@@ -11,8 +11,8 @@
  * terminal) and the broker notices after ~10s of missing heartbeats instead.
  */
 import { env } from "./config/env.js";
-import { broker } from "./config/broker.js";
-import { kv } from "./config/kv.js";
+import { broker } from "@scalecart/service-kit/broker";
+import { kv } from "@scalecart/service-kit/kv";
 import { prisma } from "./config/prisma.js";
 import { CONSUMER_GROUPS, startWorkers, stopWorkers, type ConsumerGroup } from "./events/workers.js";
 

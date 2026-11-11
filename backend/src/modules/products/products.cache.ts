@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { kv } from "../../config/kv.js";
+import { kv } from "@scalecart/service-kit/kv";
 import type { ListQuery } from "./products.validation.js";
 
 /**

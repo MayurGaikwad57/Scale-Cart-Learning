@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { authenticate, requireRole } from "../../middleware/auth.js";
-import { validateBody } from "../../middleware/validate.js";
+import { authenticate, requireRole } from "@scalecart/service-kit/auth";
+import { validateBody } from "@scalecart/service-kit/validate";
 import { z } from "zod";
-import { uuid } from "../../utils/validation.js";
+import { uuid } from "@scalecart/service-kit/validation";
 import { inventoryService, setStockSchema } from "./inventory.service.js";
 
 export const inventoryRouter = Router();

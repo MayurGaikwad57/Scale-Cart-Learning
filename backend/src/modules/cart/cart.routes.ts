@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { authenticate } from "../../middleware/auth.js";
-import { validateBody } from "../../middleware/validate.js";
-import { idParams } from "../../utils/validation.js";
+import { authenticate } from "@scalecart/service-kit/auth";
+import { validateBody } from "@scalecart/service-kit/validate";
+import { idParams } from "@scalecart/service-kit/validation";
 import { addItemSchema, cartService, updateItemSchema } from "./cart.service.js";
 
 export const cartRouter = Router();

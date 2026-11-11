@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { pageParams } from "../../utils/validation.js";
+import { pageParams } from "@scalecart/service-kit/validation";
 
 // Prices are integer cents everywhere (query string included): minPrice=1000 means 10.00.
 export const listQuerySchema = z.object({

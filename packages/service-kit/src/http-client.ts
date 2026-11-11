@@ -1,5 +1,5 @@
-import { env } from "../../config/env.js";
-import { serviceUrls, type ServiceName } from "../registry.js";
+import { kitEnv as env } from "./env.js";
+import { serviceUrls, type ServiceName } from "./registry.js";
 import { INTERNAL_TOKEN_HEADER } from "./internal-auth.js";
 import { currentRequestId, REQUEST_ID_HEADER } from "./request-context.js";
 

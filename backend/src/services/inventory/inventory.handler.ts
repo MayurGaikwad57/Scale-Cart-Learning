@@ -1,4 +1,4 @@
-import type { OrderEvent } from "../../events/order-events.js";
+import type { OrderEvent } from "@scalecart/events";
 import { reservations } from "./reservations.js";
 
 /**

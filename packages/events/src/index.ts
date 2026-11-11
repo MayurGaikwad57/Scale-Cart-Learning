@@ -1,7 +1,4 @@
 import { createHash } from "node:crypto";
-import { broker } from "../config/broker.js";
-import { brokerErrorCode } from "../log/client.js";
-import { currentRequestId } from "../services/shared/request-context.js";
 
 /**
  * THE EVENT CATALOG: every event ScaleCart publishes. An event is a FACT about the past
@@ -104,40 +101,3 @@ export function makeEvent<E extends AnyEvent>(type: E["type"], version: number, 
   } as E;
 }
 
-/** Counters for the admin page. "notPublished" > 0 means a dual write failed (see below). */
-export const publisherStats = { published: 0, notPublished: 0, lastError: null as string | null };
-
-/**
- * Publish one event. Creates the topic on first use.
- *
- * DUAL WRITE (still here in M6, fixed properly in M7 with the OUTBOX): the database change and the
- * event are two writes to two systems; either can fail alone. In M6 we limit the damage:
- *   - mode "best-effort" (checkout): never fail the customer's request; count it. The order
- *     service's RECONCILER re-publishes OrderCreated for orders stuck in PENDING.
- *   - mode "must" (inside a consumer): THROW, so the consumer does NOT commit its offset and the
- *     incoming event is retried - the retry re-publishes. Safe because event ids are deterministic.
- */
-export async function publishEvent(topic: string, event: AnyEvent, mode: "best-effort" | "must" = "best-effort"): Promise<boolean> {
-  const headers: Record<string, string> = { "x-event-type": event.type, "x-event-id": event.eventId };
-  const requestId = currentRequestId();
-  if (requestId) headers["x-request-id"] = requestId; // correlation survives the hop through the log
-  const key = (event.data as { orderId: string }).orderId;
-  try {
-    if (!broker.isReady) throw new Error("broker not connected");
-    try {
-      await broker.produce(topic, key, JSON.stringify(event), headers);
-    } catch (e) {
-      if (brokerErrorCode(e) !== "UNKNOWN_TOPIC") throw e;
-      await broker.createTopic(topic, TOPIC_PARTITIONS); // first event ever on this topic
-      await broker.produce(topic, key, JSON.stringify(event), headers);
-    }
-    publisherStats.published++;
-    return true;
-  } catch (e) {
-    publisherStats.notPublished++;
-    publisherStats.lastError = (e as Error).message;
-    if (mode === "must") throw e;
-    console.warn(`[events] ${event.type} for ${key} NOT published: ${(e as Error).message}`);
-    return false;
-  }
-}

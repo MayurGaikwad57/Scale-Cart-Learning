@@ -1,4 +1,4 @@
-import { kv } from "../config/kv.js";
+import { kv } from "./kv.js";
 
 /**
  * CACHE-ASIDE (a.k.a. lazy loading) - the app, not the cache, is in charge:

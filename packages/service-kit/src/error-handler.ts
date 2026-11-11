@@ -1,6 +1,6 @@
 import type { ErrorRequestHandler } from "express";
 import { ZodError } from "zod";
-import { HttpError } from "../utils/errors.js";
+import { HttpError } from "./errors.js";
 
 // Every error ends here, so clients always get the same JSON shape: { error, message?, details? }.
 export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {

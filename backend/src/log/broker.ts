@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { OK, RespError, SimpleString, type Reply } from "../kv/resp.js";
+import { OK, RespError, SimpleString, type Reply } from "@scalecart/service-kit/kv/resp";
 import { PartitionLog } from "./storage.js";
 
 /**

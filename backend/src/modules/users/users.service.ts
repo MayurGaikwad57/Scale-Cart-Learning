@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { env } from "../../config/env.js";
-import { conflict, unauthorized } from "../../utils/errors.js";
+import { conflict, unauthorized } from "@scalecart/service-kit/errors";
 import { usersRepository } from "./users.repository.js";
 import type { LoginInput, RegisterInput } from "./users.validation.js";
 

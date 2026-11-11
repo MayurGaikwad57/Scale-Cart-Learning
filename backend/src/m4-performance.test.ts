@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Express } from "express";
 import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { kv } from "./config/kv.js";
+import { kv } from "@scalecart/service-kit/kv";
 import { prisma } from "./config/prisma.js";
 import { startKvServer, type RunningKvServer } from "./kv/server.js";
 import { settle, startCluster, eventually, type Cluster } from "./test-cluster.js";

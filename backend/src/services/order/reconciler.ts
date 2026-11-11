@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma.js";
-import { ORDERS_TOPIC, publishEvent } from "../../events/order-events.js";
+import { ORDERS_TOPIC } from "@scalecart/events";
+import { publishEvent } from "../../events/publish.js";
 import { orderEvents, ordersService, reserveStock } from "../../modules/orders/orders.service.js";
 
 /**

@@ -3,7 +3,7 @@ import { Prisma } from "../../../generated/prisma/client.js";
 import { prisma } from "../../config/prisma.js";
 import { LOW_STOCK_THRESHOLD } from "../../events/handlers.js";
 import { invalidateProducts } from "../../modules/products/products.cache.js";
-import { uuid } from "../../utils/validation.js";
+import { uuid } from "@scalecart/service-kit/validation";
 
 /**
  * STOCK RESERVATIONS - the heart of the Inventory Service.

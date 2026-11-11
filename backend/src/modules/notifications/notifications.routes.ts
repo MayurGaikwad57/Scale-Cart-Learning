@@ -1,9 +1,9 @@
 import { Router } from "express";
 import { prisma } from "../../config/prisma.js";
 import { z } from "zod";
-import { authenticate } from "../../middleware/auth.js";
-import { validateBody } from "../../middleware/validate.js";
-import { uuid } from "../../utils/validation.js";
+import { authenticate } from "@scalecart/service-kit/auth";
+import { validateBody } from "@scalecart/service-kit/validate";
+import { uuid } from "@scalecart/service-kit/validation";
 
 // The customer's notifications - written asynchronously by the "notification" consumer group.
 export const notificationsRouter = Router();

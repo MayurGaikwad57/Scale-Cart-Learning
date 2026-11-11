@@ -4,8 +4,8 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { env } from "../../config/env.js";
 import { prisma } from "../../config/prisma.js";
-import { authenticate, requireRole } from "../../middleware/auth.js";
-import { errorHandler } from "../../middleware/errorHandler.js";
+import { authenticate, requireRole } from "@scalecart/service-kit/auth";
+import { errorHandler } from "@scalecart/service-kit/error-handler";
 import { startCluster, type Cluster } from "../../test-cluster.js";
 
 // M6: every request goes through the API gateway to the real services (see test-cluster.ts).

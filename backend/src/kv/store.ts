@@ -1,4 +1,4 @@
-import { OK, RespError, SimpleString, type Reply } from "./resp.js";
+import { OK, RespError, SimpleString, type Reply } from "@scalecart/service-kit/kv/resp";
 
 /**
  * The data engine of ScaleKV - our own small Redis. No networking here (that's server.ts),

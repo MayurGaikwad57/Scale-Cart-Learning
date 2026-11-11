@@ -1,6 +1,7 @@
-import { authenticate, requireRole } from "../../middleware/auth.js";
+import { db } from "../../config/prisma.js";
+import { authenticate, requireRole } from "@scalecart/service-kit/auth";
 import { paymentsService } from "../../modules/payments/payments.service.js";
-import { createServiceApp } from "../shared/service-app.js";
+import { createServiceApp } from "@scalecart/service-kit/service-app";
 
 /**
  * PAYMENT SERVICE (:3002). Has almost no HTTP API - its real input is the "orders" topic
@@ -16,4 +17,4 @@ export const createPaymentApp = () =>
     app.get("/admin/payments", authenticate, requireRole("ADMIN"), async (_req, res) => {
       res.json(await paymentsService.overview());
     });
-  });
+  }, { db });

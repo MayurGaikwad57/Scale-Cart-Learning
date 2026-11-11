@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { authenticate, optionalAuth, requireRole } from "../../middleware/auth.js";
-import { validateBody } from "../../middleware/validate.js";
+import { authenticate, optionalAuth, requireRole } from "@scalecart/service-kit/auth";
+import { validateBody } from "@scalecart/service-kit/validate";
 import { productsController as c } from "./products.controller.js";
 import { createProductSchema, updateProductSchema } from "./products.validation.js";
 

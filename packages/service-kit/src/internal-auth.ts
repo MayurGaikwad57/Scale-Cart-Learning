@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { RequestHandler } from "express";
-import { env } from "../../config/env.js";
-import { HttpError } from "../../utils/errors.js";
+import { kitEnv as env } from "./env.js";
+import { HttpError } from "./errors.js";
 
 /**
  * SERVICE-TO-SERVICE AUTHENTICATION for /internal/* routes (e.g. the order service asking the

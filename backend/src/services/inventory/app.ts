@@ -1,9 +1,10 @@
+import { db } from "../../config/prisma.js";
 import { Router } from "express";
 import { z } from "zod";
 import { inventoryRouter } from "../../modules/inventory/inventory.routes.js";
-import { uuid } from "../../utils/validation.js";
-import { requireInternal } from "../shared/internal-auth.js";
-import { createServiceApp } from "../shared/service-app.js";
+import { uuid } from "@scalecart/service-kit/validation";
+import { requireInternal } from "@scalecart/service-kit/internal-auth";
+import { createServiceApp } from "@scalecart/service-kit/service-app";
 import { InsufficientStockError, ReservationReleasedError, reservations, reserveSchema } from "./reservations.js";
 
 /**
@@ -51,4 +52,4 @@ export const createInventoryApp = () =>
   createServiceApp("inventory", (app) => {
     app.use("/inventory", inventoryRouter);
     app.use("/internal", internal);
-  });
+  }, { db });
