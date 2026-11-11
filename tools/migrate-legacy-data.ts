@@ -5,7 +5,8 @@
  * copies every row to the service that OWNS it. Each service's database is reached with that
  * service's own connection string (apps/<service>/.env).
  *
- *   order        users, products (+ the stock COPY from inventory), cart, cart_items, orders,
+ *   identity     users
+ *   order        products (+ the stock COPY from inventory), cart, cart_items, orders,
  *                order_items, sales_daily, processed_events of the "order" / "analytics" groups
  *   inventory    inventory, product_info (sku + name copied from products), stock_alerts,
  *                reservations, reservation_items, processed_events of the "inventory" group
@@ -35,8 +36,8 @@ const serviceUrl = (svc: string) => {
 
 type Copy = { table: string; select: string; conflict: string };
 const PLAN: Record<string, Copy[]> = {
+  identity: [{ table: "users", select: "SELECT * FROM users", conflict: "(id)" }],
   order: [
-    { table: "users", select: "SELECT * FROM users", conflict: "(id)" },
     {
       table: "products",
       select: `SELECT p.*, COALESCE(i.available, 0) AS stock_available, COALESCE(i.version, -1) AS stock_version

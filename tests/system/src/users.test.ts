@@ -1,9 +1,10 @@
+import { createHmac, createPublicKey, generateKeyPairSync } from "node:crypto";
 import express from "express";
 import jwt from "jsonwebtoken";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { kitEnv as env } from "@scalecart/service-kit/env";
-import { disconnectAll, orderDb } from "./db.js";
+import { jwks, signToken } from "@scalecart/identity/keys";
+import { disconnectAll, identityDb } from "./db.js";
 import { authenticate, requireRole } from "@scalecart/service-kit/auth";
 import { errorHandler } from "@scalecart/service-kit/error-handler";
 import { startCluster, type Cluster } from "./test-cluster.js";
@@ -21,7 +22,7 @@ const email = (n: string) => `test-${run}-${n}@example.com`;
 
 afterAll(async () => {
   await cluster.close();
-  await orderDb.user.deleteMany({ where: { email: { startsWith: `test-${run}-` } } });
+  await identityDb.user.deleteMany({ where: { email: { startsWith: `test-${run}-` } } });
   await disconnectAll();
 });
 
@@ -75,7 +76,11 @@ describe("POST /auth/login", () => {
     await request(app).post("/auth/register").send({ email: email("l1"), password: "password123" });
     const res = await request(app).post("/auth/login").send({ email: email("l1"), password: "password123" });
     expect(res.status).toBe(200);
-    const payload = jwt.verify(res.body.token, env.JWT_SECRET) as jwt.JwtPayload;
+    // RS256, with the key id in the header - verifiable with the PUBLIC key from the JWKS alone.
+    const { header } = jwt.decode(res.body.token, { complete: true })!;
+    expect(header).toMatchObject({ alg: "RS256", kid: jwks().keys[0].kid });
+    const publicKey = createPublicKey({ key: jwks().keys[0] as never, format: "jwk" });
+    const payload = jwt.verify(res.body.token, publicKey, { algorithms: ["RS256"] }) as jwt.JwtPayload;
     expect(payload.role).toBe("CUSTOMER");
     expect(payload.sub).toBe(res.body.user.id);
   });
@@ -90,22 +95,49 @@ describe("POST /auth/login", () => {
   });
 });
 
+describe("the identity service publishes only PUBLIC keys", () => {
+  it("GET /.well-known/jwks.json returns an RSA public key with its kid - and no private part", async () => {
+    const res = await request(app).get("/auth/me"); // through the gateway: 401, identity is behind it
+    expect(res.status).toBe(401);
+    const set = jwks();
+    expect(set.keys[0]).toMatchObject({ kty: "RSA", alg: "RS256", use: "sig", kid: expect.any(String) });
+    expect(set.keys[0]).not.toHaveProperty("d"); // "d" = the private exponent
+  });
+});
+
 describe("authenticate / requireRole middleware", () => {
   const guarded = express();
   guarded.get("/me", authenticate, (req, res) => res.json(req.user));
   guarded.get("/admin", authenticate, requireRole("ADMIN"), (_req, res) => res.json({ ok: true }));
   guarded.use(errorHandler);
 
-  const tokenFor = (role: string, exp: string | number = "1h") =>
-    jwt.sign({ role }, env.JWT_SECRET, { subject: "user-1", expiresIn: exp as never });
+  const tokenFor = (role: string, exp: string | number = "1h") => signToken({ id: "user-1", role }, exp);
+  const kid = () => jwks().keys[0].kid as string;
 
   it("401 without a token", async () => {
     expect((await request(guarded).get("/me")).status).toBe(401);
   });
-  it("401 for a tampered/foreign token", async () => {
-    const bad = jwt.sign({ role: "ADMIN" }, "some-other-secret-0123456789", { subject: "x" });
-    const res = await request(guarded).get("/me").set("Authorization", `Bearer ${bad}`);
-    expect(res.status).toBe(401);
+  it("401 for a token signed with ANOTHER private key (even with our key id)", async () => {
+    const { privateKey: attackerKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const forged = jwt.sign({ role: "ADMIN" }, attackerKey, { algorithm: "RS256", keyid: kid(), subject: "x" });
+    expect((await request(guarded).get("/me").set("Authorization", `Bearer ${forged}`)).status).toBe(401);
+  });
+  it("401 for the ALGORITHM-CONFUSION attack: HS256 'signed' with our public key", async () => {
+    // The attacker knows the public key (it is public!). If a verifier trusted the token's "alg",
+    // it would check an HMAC with the public key as the secret - and accept this forged admin token.
+    const pem = createPublicKey({ key: jwks().keys[0] as never, format: "jwk" }).export({ type: "spki", format: "pem" }).toString();
+    const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
+    const unsigned = `${b64({ alg: "HS256", typ: "JWT", kid: kid() })}.${b64({ sub: "x", role: "ADMIN", exp: Math.floor(Date.now() / 1000) + 600 })}`;
+    const forged = `${unsigned}.${createHmac("sha256", pem).update(unsigned).digest("base64url")}`;
+    expect((await request(guarded).get("/admin").set("Authorization", `Bearer ${forged}`)).status).toBe(401);
+  });
+  it("401 for a token without a key id, and for a tampered payload", async () => {
+    const { privateKey: k } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const noKid = jwt.sign({ role: "ADMIN" }, k, { algorithm: "RS256", subject: "x" });
+    expect((await request(guarded).get("/me").set("Authorization", `Bearer ${noKid}`)).status).toBe(401);
+    const [h, , sig] = tokenFor("CUSTOMER").split(".");
+    const tampered = `${h}.${Buffer.from(JSON.stringify({ sub: "user-1", role: "ADMIN", exp: 9999999999 })).toString("base64url")}.${sig}`;
+    expect((await request(guarded).get("/admin").set("Authorization", `Bearer ${tampered}`)).status).toBe(401);
   });
   it("401 for an expired token", async () => {
     const res = await request(guarded).get("/me").set("Authorization", `Bearer ${tokenFor("CUSTOMER", -10)}`);

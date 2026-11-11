@@ -6,7 +6,7 @@ since **M6.5** every service is its own app (`apps/`) — see `docs/09-real-micr
 See `project-plan.md` for the roadmap and `docs/` for design decisions.
 
 - `apps/` **one folder per deployable service**, each with its own `package.json`, `.env`, and `npm run dev`:
-  `gateway` :3000, `order` :3001, `payment` :3002, `inventory` :3003, `notification` :3004,
+  `gateway` :3000, `identity` :3005, `order` :3001, `payment` :3002, `inventory` :3003, `notification` :3004,
   plus `scalekv` :6380 (**ScaleKV**, our own Redis) and `scalelog` :9093 (**ScaleLog**, our own Kafka). No Redis/Kafka install needed.
 - `packages/service-kit` the **microservice chassis** every service shares: Express skeleton, health checks, request ids,
   errors, auth, service calls, ScaleKV/ScaleLog clients, consumer runtime.
@@ -16,8 +16,10 @@ See `project-plan.md` for the roadmap and `docs/` for design decisions.
 
 It is an **npm workspaces monorepo**. The two rules that make the services real microservices:
 **an app never imports another app** (`npm run check:boundaries` enforces it), and **every service has its own
-database** (`scalecart_order`, `scalecart_inventory`, `scalecart_payment`, `scalecart_notification`), reachable only
-with that service's own database user. Services talk only over HTTP and events.
+database** (`scalecart_identity`, `scalecart_order`, `scalecart_inventory`, `scalecart_payment`,
+`scalecart_notification`), reachable only with that service's own database user. Services talk only over HTTP and
+events. Sign-in: the **identity** service is the only one holding the signing key (RS256); every other service verifies
+tokens with its public key from `/.well-known/jwks.json`.
 M6.5 progress and design: `docs/09-real-microservices.md`.
 
 ## Run locally
@@ -27,12 +29,13 @@ M6.5 progress and design: `docs/09-real-microservices.md`.
    ```
    npm install                 # ONCE, at the repo root: installs and links every workspace
    # each service has its own settings: copy apps/<name>/.env.example to apps/<name>/.env
-   # (gateway, order, payment, inventory, notification), and .env.example to .env (ADMIN_DATABASE_URL)
+   # (gateway, identity, order, payment, inventory, notification), and .env.example to .env (ADMIN_DATABASE_URL)
    npm run db:create-service-dbs   # one database + one DB user per service; writes each URL into that app's .env
+   npm run keys -w @scalecart/identity   # the token signing key (only the identity service gets it)
    npm run db:deploy           # create each service's tables in its own database
    npm run db:generate         # each service's Prisma client
    npm run dev                 # starts EVERYTHING: ScaleKV, ScaleLog, the 4 services and the gateway
-   npm run seed                # (in a 2nd terminal, while dev runs) admin account + 14 sample products
+   npm run seed                # (in a 2nd terminal, while dev runs) admin account (identity) + 14 products (order)
    ```
    `npm run dev` prefixes every log line with the process name and starts every app in its own folder (so it reads
    its own `.env`, like a container). To play with failures, run the pieces in separate terminals instead:

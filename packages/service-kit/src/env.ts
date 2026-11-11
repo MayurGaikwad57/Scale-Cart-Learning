@@ -2,13 +2,13 @@ import "dotenv/config";
 import { z } from "zod";
 
 /**
- * The settings EVERY service needs (the chassis, service discovery, auth, ScaleKV/ScaleLog).
+ * The settings EVERY service needs (the chassis, service discovery, ScaleKV/ScaleLog).
+ * No signing secret any more (M6.5 phase 4): tokens are verified with the identity service's PUBLIC key.
  * Each app extends this with its own settings:   baseEnvSchema.extend({ DATABASE_URL: ... })
  * Parsed at startup: a missing or invalid value stops the process immediately (fail fast).
  */
 export const baseEnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  JWT_SECRET: z.string().min(16),
   // e.g. kv://127.0.0.1:6380 - our own Redis-like store. Optional: unset = run without it.
   KV_URL: z.string().optional(),
   // e.g. kv://127.0.0.1:9093 - the ScaleLog broker (our Kafka). Optional: unset = no events.
@@ -25,10 +25,12 @@ export const baseEnvSchema = z.object({
 
   // SERVICE DISCOVERY: where each service listens / can be reached. Locally: 127.0.0.1 + its port.
   // In Kubernetes these would be service DNS names like http://inventory:3003 - only config changes.
+  IDENTITY_PORT: z.coerce.number().default(3005),
   ORDER_PORT: z.coerce.number().default(3001),
   PAYMENT_PORT: z.coerce.number().default(3002),
   INVENTORY_PORT: z.coerce.number().default(3003),
   NOTIFICATION_PORT: z.coerce.number().default(3004),
+  IDENTITY_SERVICE_URL: z.string().optional(),
   ORDER_SERVICE_URL: z.string().optional(),
   PAYMENT_SERVICE_URL: z.string().optional(),
   INVENTORY_SERVICE_URL: z.string().optional(),

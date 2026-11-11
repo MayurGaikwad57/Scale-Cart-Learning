@@ -180,7 +180,7 @@ export const GROUPS: Record<ConsumerGroup, { topic: string; service: Service; de
   product_sync: { topic: PRODUCTS_TOPIC, service: "inventory", description: "ProductCreated -> create the stock row; ProductCreated / ProductUpdated -> our copy of sku + name" },
 };
 
-export const groupsOfService = (service: Service) => CONSUMER_GROUPS.filter((g) => GROUPS[g].service === service);
+export const groupsOfService = (service: string) => CONSUMER_GROUPS.filter((g) => GROUPS[g].service === service);
 export const dlqTopicOf = (group: ConsumerGroup) => `${GROUPS[group].topic}.${group}.dlq`;
 
 /** Build a consumer definition (the shape the service-kit's consumer runtime takes) from the directory. */

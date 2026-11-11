@@ -68,7 +68,7 @@ while coding) and as compiled JavaScript in production (`tsc -b` builds them fir
 | 1 | **Workspaces + shared packages** — root workspaces, `packages/service-kit`, `packages/events`; the chassis no longer knows Prisma or any service's consumer groups (they are passed in). No behaviour change. | ✅ all tests pass, `npm run dev` and compiled `npm start` work |
 | 2 | **One app per service** — `apps/<name>` with own `package.json`, env schema, scripts; owned modules move in; event handlers split per app; lint rule "no app imports another app" | ✅ see "Phase 2 — what changed" below |
 | 3 | **Database per service** — 4 databases + 4 DB users, own Prisma schema + migrations per app, no cross-DB foreign keys, own `processed_events`, `/internal/stock-alerts`, one-time data migration script (old DB kept as a backup) | ✅ see "Phase 3 — what changed" below |
-| 4 | **Identity service** — users/auth out of order, own DB, RS256 + JWKS, gateway routes `/auth` → identity | login/register work; only identity holds the signing key |
+| 4 | **Identity service** — users/auth out of order, own DB, RS256 + JWKS, gateway routes `/auth` → identity | ✅ see "Phase 4 — what changed" below |
 | 5 | **Catalog service** — products out of order, own DB, `ProductCreated/Updated` + `StockChanged` events, stock copy, cart/checkout call catalog, gateway routes `/products` → catalog | catalog, cart, checkout, admin product CRUD work end to end |
 | 6 | **Deploy per service** — Dockerfile per app, `docker-compose.yml`, GitHub Actions per app | CI green for every app |
 
@@ -116,6 +116,22 @@ while coding) and as compiled JavaScript in production (`tsc -b` builds them fir
 - **Data migration** (`npm run db:migrate-legacy-data`): copied every row from the old shared database to its owner
   (row counts compared). The old database `scale_cart` was **not** changed and stays as a backup.
 - `packages/legacy-db` deleted. New system tests: `tests/system/src/m65-service-databases.test.ts`.
+
+## Phase 4 — what changed
+
+- **`apps/identity`** (:3005, database `scalecart_identity`, user `identity_svc`): register, login, `/auth/me`, and
+  `GET /.well-known/jwks.json`. The users table moved out of the order database (`npm run db:move-users-to-identity`,
+  then the order migration `1_users_moved_to_identity` drops `users` and the two foreign keys to it).
+- **RS256 + JWKS instead of one shared HS256 secret.** Before, every service had `JWT_SECRET` - so every service could
+  also *forge* an admin token. Now only identity has the **private** key (`npm run keys -w @scalecart/identity`);
+  the kit's `authenticate` downloads the **public** keys once, caches them, and verifies locally (no call to identity
+  per request; if identity is down, logged-in users keep working). An unknown `kid` triggers one refetch - the basis
+  of **key rotation**. `algorithms: ["RS256"]` blocks the **algorithm-confusion** attack (tested).
+- `JWT_SECRET` is gone from every service. The gateway routes `/auth` to identity; the frontend did not change.
+- Tests: users in the identity DB, tokens signed like a real login; new tests for a foreign key, a tampered payload,
+  a missing `kid` and the algorithm-confusion attack.
+- Not done (next steps in a real system): refresh tokens with rotation, HttpOnly-cookie sessions (the frontend keeps
+  the token in localStorage), logout / token revocation, an off-the-shelf IdP (Keycloak, Auth0, Cognito).
 
 ## Known gaps (on purpose)
 

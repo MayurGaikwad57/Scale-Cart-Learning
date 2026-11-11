@@ -5,6 +5,7 @@
  *
  *   kv           ScaleKV (our Redis)          :6380   apps/scalekv
  *   log          ScaleLog (our Kafka)         :9093   apps/scalelog
+ *   identity     Identity Service             :3005   apps/identity
  *   inventory    Inventory Service            :3003   apps/inventory
  *   payment      Payment Service              :3002   apps/payment
  *   notification Notification Service         :3004   apps/notification
@@ -24,6 +25,7 @@ import { fileURLToPath } from "node:url";
 const PROCESSES: Record<string, { app: string; entry: string; watch: boolean; color: number }> = {
   kv: { app: "scalekv", entry: "kv-server", watch: false, color: 90 },
   log: { app: "scalelog", entry: "log-server", watch: false, color: 90 },
+  identity: { app: "identity", entry: "main", watch: true, color: 31 },
   inventory: { app: "inventory", entry: "main", watch: true, color: 33 },
   payment: { app: "payment", entry: "main", watch: true, color: 35 },
   notification: { app: "notification", entry: "main", watch: true, color: 36 },

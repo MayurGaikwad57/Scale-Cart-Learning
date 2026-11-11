@@ -1,17 +1,17 @@
 import { randomUUID } from "node:crypto";
-import jwt from "jsonwebtoken";
-import { kitEnv as env } from "@scalecart/service-kit/env";
-import { inventoryDb, notificationDb, orderDb, paymentDb } from "./db.js";
+import { signToken } from "@scalecart/identity/keys";
+import { identityDb, inventoryDb, notificationDb, orderDb, paymentDb } from "./db.js";
 
 // Test helpers: create users/products straight in the DB (fast, no bcrypt) and tag them with a
 // per-run prefix so cleanup only ever deletes rows this run created.
 export const RUN = `t${Date.now()}${Math.floor(Math.random() * 1000)}`;
 
 export async function makeUser(role: "CUSTOMER" | "ADMIN" = "CUSTOMER") {
-  const user = await orderDb.user.create({
+  // Users live in the IDENTITY service's database; the token is signed exactly like a real login (RS256).
+  const user = await identityDb.user.create({
     data: { email: `${RUN}-${randomUUID().slice(0, 8)}@example.com`, passwordHash: "x", role },
   });
-  const token = jwt.sign({ role }, env.JWT_SECRET, { subject: user.id, expiresIn: "1h" });
+  const token = signToken(user);
   return { user, auth: { Authorization: `Bearer ${token}` } };
 }
 
@@ -54,7 +54,7 @@ export async function makeProducts(n: number, stock: number) {
 
 /** Delete everything this run created - in EVERY service's database (no cross-database cascades). */
 export async function cleanup() {
-  const users = await orderDb.user.findMany({ where: { email: { startsWith: `${RUN}-` } }, select: { id: true } });
+  const users = await identityDb.user.findMany({ where: { email: { startsWith: `${RUN}-` } }, select: { id: true } });
   const userIds = users.map((u) => u.id);
   const products = await orderDb.product.findMany({ where: { sku: { startsWith: `${RUN}-` } }, select: { id: true } });
   const productIds = products.map((p) => p.id);
@@ -76,5 +76,6 @@ export async function cleanup() {
   await orderDb.cartItem.deleteMany({ where: { productId: { in: productIds } } });
   await orderDb.cart.deleteMany({ where: { userId: { in: userIds } } });
   await orderDb.product.deleteMany({ where: { id: { in: productIds } } });
-  await orderDb.user.deleteMany({ where: { id: { in: userIds } } });
+  // identity service
+  await identityDb.user.deleteMany({ where: { id: { in: userIds } } });
 }

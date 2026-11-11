@@ -1,18 +1,14 @@
-// Development seed: one admin account + sample products. Safe to run repeatedly (upserts by email / sku).
-//   npm run seed        (with ScaleLog running: npm run dev)
+// Development seed: sample products. Safe to run repeatedly (upserts by sku).
+//   npm run seed        (with ScaleLog running: npm run dev). The admin account is seeded by the identity service.
 //
 // M6.5: products live in the ORDER service's database, their stock in the INVENTORY service's. The
 // seed creates the products here and publishes ProductCreated for each NEW one; the inventory
 // service creates the stock rows from those events (it is the only one that writes its database).
 import { deterministicEventId, makeEvent, type ProductCreated } from "@scalecart/events";
 import { broker } from "@scalecart/service-kit/broker";
-import bcrypt from "bcryptjs";
 import { env } from "../config/env.js";
 import { prisma } from "../config/prisma.js";
 import { publishProductEvent } from "../events/publish.js";
-
-const ADMIN_EMAIL = (process.env.ADMIN_EMAIL ?? "admin@scalecart.com").toLowerCase();
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "Admin@12345";
 
 // [sku, name, description, price in cents, category, stock]
 const products: [string, string, string, number, string, number][] = [
@@ -33,12 +29,6 @@ const products: [string, string, string, number, string, number][] = [
 ];
 
 async function main() {
-  await prisma.user.upsert({
-    where: { email: ADMIN_EMAIL },
-    create: { email: ADMIN_EMAIL, passwordHash: await bcrypt.hash(ADMIN_PASSWORD, 10), role: "ADMIN" },
-    update: { role: "ADMIN" },
-  });
-
   if (!env.LOG_URL) throw new Error("LOG_URL is not set: the seed announces new products to the inventory service through ScaleLog");
   broker.conn.connect(env.LOG_URL);
   await broker.conn.waitUntilReady(5000).catch(() => {
@@ -60,7 +50,7 @@ async function main() {
       if (!ok) throw new Error(`could not announce ${sku} to the inventory service (ScaleLog down?)`);
     }
   }
-  console.log(`Seeded admin ${ADMIN_EMAIL} and ${products.length} products (${created} new, announced to the inventory service).`);
+  console.log(`Seeded ${products.length} products (${created} new, announced to the inventory service).`);
 }
 
 main().finally(async () => {

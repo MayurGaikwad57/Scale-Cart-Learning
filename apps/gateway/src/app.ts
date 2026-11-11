@@ -13,7 +13,7 @@ import { proxyStats, proxyTo } from "./proxy.js";
 
 /**
  * API GATEWAY (:3000) - the single front door. The Angular app still talks to ONE address and has
- * no idea that there are now four services behind it.
+ * no idea that there are now five services behind it.
  *
  * Its jobs (and ONLY these - no business logic here, or the gateway becomes a new monolith):
  *   ROUTING           path prefix -> service (the table below)
@@ -37,7 +37,7 @@ export const ROUTES: { prefix: string; service: ServiceName; access: Access; tim
   { prefix: "/orders", service: "order", access: "user", timeoutMs: 20_000 }, // checkout calls inventory too
   { prefix: "/cart", service: "order", access: "user" },
   { prefix: "/products", service: "order", access: "public" },
-  { prefix: "/auth", service: "order", access: "public" }, // /auth/me checks the token itself
+  { prefix: "/auth", service: "identity", access: "public" }, // /auth/me checks the token itself
 ];
 
 const edgeAuth: Record<Access, RequestHandler[]> = {

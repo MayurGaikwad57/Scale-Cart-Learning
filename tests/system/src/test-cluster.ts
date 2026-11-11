@@ -26,6 +26,7 @@ import { startLogServer, type RunningLogServer } from "@scalecart/scalelog/serve
 import { paymentSettings } from "@scalecart/payment/modules/payments/payments.service";
 import { serviceUrls, type ServiceName } from "@scalecart/service-kit/registry";
 import { createGatewayApp } from "@scalecart/gateway/app";
+import { createIdentityApp } from "@scalecart/identity/app";
 import { createInventoryApp } from "@scalecart/inventory/app";
 import { createNotificationApp } from "@scalecart/notification/app";
 import { createOrderApp } from "@scalecart/order/app";
@@ -49,6 +50,7 @@ export interface Cluster {
 }
 
 const factories: Record<ServiceName, () => Express> = {
+  identity: createIdentityApp,
   order: createOrderApp,
   payment: createPaymentApp,
   inventory: createInventoryApp,

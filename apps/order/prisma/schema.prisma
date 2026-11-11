@@ -1,6 +1,7 @@
 // ORDER SERVICE database (scalecart_order) - only the tables the order service OWNS.
 // No other service can connect to this database (own DB user, CONNECT revoked from everyone else).
-// Users and products still live here until the identity and catalog services are extracted.
+// Users live in the IDENTITY service's database since M6.5 phase 4: here a user is just an id
+// (from the token) on carts and orders - no foreign key. Products stay until the catalog service.
 // Money is stored as integer cents. IDs are UUIDs.
 
 generator client {
@@ -10,11 +11,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-}
-
-enum Role {
-  CUSTOMER
-  ADMIN
 }
 
 enum OrderStatus {
@@ -27,19 +23,6 @@ enum PaymentStatus {
   PENDING
   SUCCEEDED
   FAILED
-}
-
-model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  email        String   @unique
-  passwordHash String   @map("password_hash")
-  role         Role     @default(CUSTOMER)
-  createdAt    DateTime @default(now()) @map("created_at")
-
-  cart   Cart?
-  orders Order[]
-
-  @@map("users")
 }
 
 model Product {
@@ -68,8 +51,8 @@ model Product {
 
 model Cart {
   id     String     @id @default(uuid()) @db.Uuid
+  // The identity service's user id (from the verified token). No foreign key: users are in another database.
   userId String     @unique @map("user_id") @db.Uuid
-  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   items  CartItem[]
 
   @@map("cart")
@@ -104,7 +87,6 @@ model Order {
   statusReason           String?       @map("status_reason")
   createdAt              DateTime      @default(now()) @map("created_at")
 
-  user  User        @relation(fields: [userId], references: [id])
   items OrderItem[]
 
   @@unique([userId, idempotencyKey])

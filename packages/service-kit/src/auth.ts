@@ -1,8 +1,24 @@
+import { createPublicKey, type KeyObject } from "node:crypto";
 import type { RequestHandler } from "express";
 import jwt from "jsonwebtoken";
-import { kitEnv as env } from "./env.js";
-import { forbidden, unauthorized } from "./errors.js";
+import { forbidden, HttpError, unauthorized } from "./errors.js";
+import { serviceUrls } from "./registry.js";
 
+/**
+ * TOKEN VERIFICATION with the identity service's PUBLIC key (M6.5 phase 4: RS256 + JWKS).
+ *
+ *   identity service   holds the PRIVATE key -> the only one that can SIGN (create) a token
+ *   every other one    downloads the PUBLIC key from  identity /.well-known/jwks.json  -> can only VERIFY
+ *
+ * Before (HS256), every service had the same secret - so every service could also FORGE a token for
+ * any user, including an admin. Now a compromised order service still can't mint tokens.
+ *
+ * The keys are CACHED in memory: verifying a token is a local CPU operation, no call to the identity
+ * service per request - if it is down, everyone already logged in keeps working. An unknown key id
+ * ("kid") triggers ONE refetch (that is how key ROTATION works: identity starts signing with a new key,
+ * services learn it on the first token they see), at most every few seconds so garbage tokens can't
+ * make us hammer the identity service.
+ */
 export type Role = "CUSTOMER" | "ADMIN";
 export interface AuthUser {
   id: string;
@@ -15,27 +31,68 @@ declare module "express-serve-static-core" {
   }
 }
 
-// Reads "Authorization: Bearer <token>", verifies the signature, and attaches req.user.
-export const authenticate: RequestHandler = (req, _res, next) => {
-  const header = req.headers.authorization;
-  if (!header?.startsWith("Bearer ")) throw unauthorized("missing_token");
+const keys = new Map<string, KeyObject>();
+let lastFetch = 0;
+let inflight: Promise<void> | undefined;
+const REFETCH_MIN_INTERVAL_MS = 5_000;
+
+/** Where the public keys are published. Read at call time: tests move services to random ports. */
+export const jwksUrl = () => `${serviceUrls.identity}/.well-known/jwks.json`;
+
+async function fetchKeys() {
+  lastFetch = Date.now();
+  const res = await fetch(jwksUrl(), { signal: AbortSignal.timeout(2000) });
+  if (!res.ok) throw new Error(`JWKS answered ${res.status}`);
+  const body = (await res.json()) as { keys: ({ kid?: string } & Record<string, unknown>)[] };
+  for (const jwk of body.keys) if (jwk.kid) keys.set(jwk.kid, createPublicKey({ key: jwk as Parameters<typeof createPublicKey>[0] & object, format: "jwk" } as never));
+}
+
+async function keyFor(kid: string): Promise<KeyObject | undefined> {
+  if (keys.has(kid)) return keys.get(kid);
+  if (Date.now() - lastFetch < REFETCH_MIN_INTERVAL_MS && keys.size) return undefined; // just tried
+  inflight ??= fetchKeys().finally(() => (inflight = undefined)); // one fetch, however many requests wait
   try {
-    const payload = jwt.verify(header.slice(7), env.JWT_SECRET) as jwt.JwtPayload;
-    req.user = { id: payload.sub as string, role: payload.role as Role };
-    next();
+    await inflight;
+  } catch (e) {
+    // Never fetched anything and identity unreachable: we CANNOT check tokens -> 503, not 401
+    // (the token may be perfectly fine; telling the user "log in again" would be wrong).
+    if (!keys.size) throw new HttpError(503, "auth_unavailable", `Can't verify sign-ins right now: ${(e as Error).message}`);
+  }
+  return keys.get(kid);
+}
+
+/** Verify a token: signature (RS256 ONLY), expiry. Returns the user or throws 401. */
+export async function verifyToken(token: string): Promise<AuthUser> {
+  const decoded = jwt.decode(token, { complete: true });
+  const kid = decoded?.header.kid;
+  if (!kid) throw unauthorized("invalid_token");
+  const key = await keyFor(kid);
+  if (!key) throw unauthorized("invalid_token");
+  try {
+    // algorithms: ["RS256"] - NEVER trust the "alg" in the token header. Otherwise an attacker could
+    // send an HS256 token "signed" with our PUBLIC key as the secret (the classic algorithm-confusion attack).
+    const payload = jwt.verify(token, key, { algorithms: ["RS256"] }) as jwt.JwtPayload;
+    return { id: payload.sub as string, role: payload.role as Role };
   } catch {
     throw unauthorized("invalid_token");
   }
+}
+
+// Reads "Authorization: Bearer <token>", verifies it, and attaches req.user.
+export const authenticate: RequestHandler = async (req, _res, next) => {
+  const header = req.headers.authorization;
+  if (!header?.startsWith("Bearer ")) throw unauthorized("missing_token");
+  req.user = await verifyToken(header.slice(7));
+  next();
 };
 
 // For public routes that behave differently for logged-in users (e.g. admins see inactive
 // products). A missing or bad token is not an error here: the caller is just anonymous.
-export const optionalAuth: RequestHandler = (req, _res, next) => {
+export const optionalAuth: RequestHandler = async (req, _res, next) => {
   const header = req.headers.authorization;
   if (header?.startsWith("Bearer ")) {
     try {
-      const payload = jwt.verify(header.slice(7), env.JWT_SECRET) as jwt.JwtPayload;
-      req.user = { id: payload.sub as string, role: payload.role as Role };
+      req.user = await verifyToken(header.slice(7));
     } catch {
       /* treat as anonymous */
     }

@@ -9,14 +9,15 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@scalecart/events": "*",
     "@scalecart/gateway": "*",
-    "@scalecart/order": "*",
-    "@scalecart/payment": "*",
+    "@scalecart/identity": "*",
     "@scalecart/inventory": "*",
     "@scalecart/notification": "*",
+    "@scalecart/order": "*",
+    "@scalecart/payment": "*",
     "@scalecart/scalekv": "*",
     "@scalecart/scalelog": "*",
-    "@scalecart/events": "*",
     "@scalecart/service-kit": "*"
   },
   "devDependencies": {

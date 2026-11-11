@@ -106,7 +106,8 @@ describe("API gateway", () => {
   it("admin > services shows every service, its routes, consumer groups and traffic", async () => {
     const res = await request(app).get("/admin/services").set(admin.auth).expect(200);
     const byName = Object.fromEntries(res.body.services.map((s: { service: string }) => [s.service, s]));
-    expect(Object.keys(byName).sort()).toEqual(["inventory", "notification", "order", "payment"]);
+    expect(Object.keys(byName).sort()).toEqual(["identity", "inventory", "notification", "order", "payment"]);
+    expect(byName.identity.routes).toEqual(["/auth"]); // M6.5: login moved out of the order service
     expect(byName.payment).toMatchObject({ up: true, status: "ready" });
     expect(byName.payment.groups.map((g: { group: string }) => g.group)).toEqual(["payment"]);
     expect(byName.inventory.routes).toContain("/inventory");

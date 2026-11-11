@@ -1,7 +1,6 @@
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
-import { env } from "../../config/env.js";
 import { conflict, unauthorized } from "@scalecart/service-kit/errors";
+import { signToken } from "../../keys.js";
 import { usersRepository } from "./users.repository.js";
 import type { LoginInput, RegisterInput } from "./users.validation.js";
 
@@ -10,9 +9,6 @@ const BCRYPT_COST = 10;
 // take about the same time (prevents leaking which emails are registered).
 const DUMMY_HASH = bcrypt.hashSync("not-a-real-password", BCRYPT_COST);
 
-function signToken(user: { id: string; role: string }) {
-  return jwt.sign({ role: user.role }, env.JWT_SECRET, { subject: user.id, expiresIn: "1h" });
-}
 
 export const usersService = {
   async register({ email, password }: RegisterInput) {

@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "tsx tools/dev-all.ts",
     "start:all": "tsx tools/dev-all.ts --compiled",
-    "build": "npm run db:generate && tsc -b apps/gateway apps/order apps/payment apps/inventory apps/notification apps/scalekv apps/scalelog",
+    "build": "npm run db:generate && tsc -b apps/gateway apps/identity apps/order apps/payment apps/inventory apps/notification apps/scalekv apps/scalelog",
     "typecheck": "npm run build && tsc -p tests/system",
     "test": "npm test -w @scalecart/scalekv -w @scalecart/scalelog -w @scalecart/system-tests",
     "check:boundaries": "tsx tools/check-boundaries.ts",
@@ -19,11 +19,12 @@
     "kv:cli": "npm run cli -w @scalecart/scalekv",
     "log": "npm run dev -w @scalecart/scalelog",
     "log:cli": "npm run cli -w @scalecart/scalelog --",
-    "seed": "npm run seed -w @scalecart/order",
-    "db:generate": "npm run db:generate -w @scalecart/order && npm run db:generate -w @scalecart/inventory && npm run db:generate -w @scalecart/payment && npm run db:generate -w @scalecart/notification",
-    "db:deploy": "npm run db:deploy -w @scalecart/order && npm run db:deploy -w @scalecart/inventory && npm run db:deploy -w @scalecart/payment && npm run db:deploy -w @scalecart/notification",
+    "seed": "npm run seed -w @scalecart/identity && npm run seed -w @scalecart/order",
+    "db:generate": "npm run db:generate -w @scalecart/identity && npm run db:generate -w @scalecart/order && npm run db:generate -w @scalecart/inventory && npm run db:generate -w @scalecart/payment && npm run db:generate -w @scalecart/notification",
+    "db:deploy": "npm run db:deploy -w @scalecart/identity && npm run db:deploy -w @scalecart/order && npm run db:deploy -w @scalecart/inventory && npm run db:deploy -w @scalecart/payment && npm run db:deploy -w @scalecart/notification",
     "db:create-service-dbs": "tsx tools/create-service-dbs.ts",
-    "db:migrate-legacy-data": "tsx tools/migrate-legacy-data.ts"
+    "db:migrate-legacy-data": "tsx tools/migrate-legacy-data.ts",
+    "db:move-users-to-identity": "tsx tools/move-users-to-identity.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
