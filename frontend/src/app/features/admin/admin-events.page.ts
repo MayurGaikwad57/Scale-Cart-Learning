@@ -11,14 +11,16 @@ import { Icon } from '../../shared/components/icon';
 import { MoneyPipe } from '../../shared/pipes/money.pipe';
 
 const REFRESH_MS = 3000;
-// M6: every group belongs to a SERVICE and reads one topic (see backend events/workers.ts).
-const GROUPS = ['payment', 'order', 'inventory', 'notification', 'analytics'] as const;
+// Every group belongs to a SERVICE and reads one topic (the directory: packages/events/src/index.ts).
+const GROUPS = ['payment', 'order', 'inventory', 'notification', 'analytics', 'product_stock', 'product_sync'] as const;
 const GROUP_INFO: Record<string, { text: string; service: string; topic: string }> = {
   payment: { text: 'Charges the card for every new order', service: 'payment', topic: 'orders' },
   order: { text: 'Confirms or cancels the order from the payment result', service: 'order', topic: 'payments' },
   inventory: { text: 'Sells or releases the reserved stock; low-stock alerts', service: 'inventory', topic: 'orders' },
   notification: { text: 'Tells the customer: the bell in the navbar', service: 'notification', topic: 'orders' },
   analytics: { text: 'Builds the daily sales report below', service: 'order', topic: 'orders' },
+  product_stock: { text: "Keeps the catalog's copy of the stock up to date (StockChanged)", service: 'catalog', topic: 'inventory' },
+  product_sync: { text: 'Creates the stock row of a new product; copies sku + name (ProductCreated/Updated)', service: 'inventory', topic: 'products' },
 };
 
 interface Snapshot {
@@ -40,7 +42,7 @@ interface Snapshot {
       <div>
         <div class="sc-eyebrow">Admin</div>
         <h1 class="sc-page-title">Events</h1>
-        <p class="sc-muted mb-0">An order travels as events: <code>OrderCreated</code> → <code>PaymentSucceeded</code>/<code>PaymentFailed</code> → <code>OrderConfirmed</code>/<code>OrderCancelled</code>. Five consumer groups in four services react independently.</p>
+        <p class="sc-muted mb-0">An order travels as events: <code>OrderCreated</code> → <code>PaymentSucceeded</code>/<code>PaymentFailed</code> → <code>OrderConfirmed</code>/<code>OrderCancelled</code>. Seven consumer groups in five services react independently.</p>
       </div>
       <div class="d-flex flex-wrap gap-2">
         <a routerLink="/admin/services" class="sc-btn sc-btn-soft"><app-icon name="layers" [size]="18" /> Services</a>
@@ -86,7 +88,7 @@ interface Snapshot {
         @if (d.overview.broker.status !== 'ready') {
           <div class="sc-alert sc-alert-warn mt-3 mb-0">
             <app-icon name="info" [size]="20" />
-            <span>Checkout still works without the broker. Start it with <code>npm run log</code> in the <code>backend</code> folder; the API reconnects by itself.</span>
+            <span>Checkout still works without the broker. Start it with <code>npm run log</code> from the repo root; the services reconnect by themselves.</span>
           </div>
         }
       </div>
@@ -229,10 +231,10 @@ interface Snapshot {
       <div class="sc-card sc-card-pad">
         <h2 class="h6">Try it</h2>
         <ol class="small mb-0 sc-try">
-          <li><b>Rebalancing:</b> in a new terminal run <code>cd backend; npm run worker -- payment</code>. The payment group now has 2 members that split the 3 partitions. Ctrl+C the worker and the partitions move back.</li>
+          <li><b>Rebalancing:</b> in a new terminal run <code>npm run worker -w @scalecart/payment</code>. The payment group now has 2 members that split the 3 partitions. Ctrl+C the worker and the partitions move back.</li>
           <li><b>Retry → DLQ → replay:</b> switch on <i>Chaos</i> for <i>notification</i>, place an order: each of its events is retried 3× and lands in the DLQ, while <i>analytics</i> still counts it. Switch chaos off and press <i>Replay</i>: the notification arrives, and every other group recognises the replayed events (no second charge, no double count).</li>
           <li><b>Broker down:</b> stop the broker and place an order. Checkout still answers (stock reserved), but <code>OrderCreated</code> is missed and the order waits in <i>Pending</i>. Start the broker again: within ~30 s the order service's <b>reconciler</b> re-publishes it and the order completes.</li>
-          <li><b>Payment service down:</b> run the services in separate terminals (see <code>/admin/services</code>), stop <code>npm run svc:payment</code> and place orders: they wait in <i>Pending</i> and the lag of <i>payment</i> grows. Start it again and they are all charged.</li>
+          <li><b>Payment service down:</b> run the services in separate terminals (see <code>/admin/services</code>), stop the payment service (<code>npm run dev -w @scalecart/payment</code>) and place orders: they wait in <i>Pending</i> and the lag of <i>payment</i> grows. Start it again and they are all charged.</li>
         </ol>
       </div>
     } @else if (!error()) {

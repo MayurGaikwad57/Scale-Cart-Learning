@@ -1,0 +1,20 @@
+{
+  "name": "@scalecart/events",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The event contracts between ScaleCart services: topic names, event types, event ids",
+  "type": "module",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3"
+  }
+}

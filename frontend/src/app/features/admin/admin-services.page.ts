@@ -12,10 +12,12 @@ import { MoneyPipe } from '../../shared/pipes/money.pipe';
 const REFRESH_MS = 2000;
 
 const INFO: Record<ServiceStatus['service'], { title: string; icon: IconName; port: number; owns: string; script: string }> = {
-  order: { title: 'Order service', icon: 'package', port: 3001, owns: 'users, products, cart, orders', script: 'npm run svc:order' },
-  payment: { title: 'Payment service', icon: 'card', port: 3002, owns: 'payments', script: 'npm run svc:payment' },
-  inventory: { title: 'Inventory service', icon: 'layers', port: 3003, owns: 'inventory, reservations', script: 'npm run svc:inventory' },
-  notification: { title: 'Notification service', icon: 'bell', port: 3004, owns: 'notifications', script: 'npm run svc:notification' },
+  identity: { title: 'Identity service', icon: 'shield', port: 3005, owns: 'users (database scalecart_identity)', script: 'npm run dev -w @scalecart/identity' },
+  catalog: { title: 'Catalog service', icon: 'grid', port: 3006, owns: 'products (database scalecart_catalog)', script: 'npm run dev -w @scalecart/catalog' },
+  order: { title: 'Order service', icon: 'package', port: 3001, owns: 'cart, orders (database scalecart_order)', script: 'npm run dev -w @scalecart/order' },
+  payment: { title: 'Payment service', icon: 'card', port: 3002, owns: 'payments (database scalecart_payment)', script: 'npm run dev -w @scalecart/payment' },
+  inventory: { title: 'Inventory service', icon: 'layers', port: 3003, owns: 'stock, reservations (database scalecart_inventory)', script: 'npm run dev -w @scalecart/inventory' },
+  notification: { title: 'Notification service', icon: 'bell', port: 3004, owns: 'notifications (database scalecart_notification)', script: 'npm run dev -w @scalecart/notification' },
 };
 
 interface Snapshot {
@@ -36,7 +38,7 @@ interface Snapshot {
       <div>
         <div class="sc-eyebrow">Admin</div>
         <h1 class="sc-page-title">Services</h1>
-        <p class="sc-muted mb-0">The browser talks only to the <b>API gateway</b> (:3000). It routes every request to one of four services. Updates every 2 seconds.</p>
+        <p class="sc-muted mb-0">The browser talks only to the <b>API gateway</b> (:3000). It routes every request to one of six services, each with its own database. Updates every 2 seconds.</p>
       </div>
       <div class="d-flex flex-wrap gap-2">
         <a routerLink="/admin/events" class="sc-btn sc-btn-soft"><app-icon name="activity" [size]="18" /> Events</a>
@@ -68,7 +70,7 @@ interface Snapshot {
 
       <div class="row g-4 mb-4">
         @for (s of d.overview.services; track s.service) {
-          @let i = info[s.service];
+          @let i = infoFor(s.service);
           <div class="col-md-6">
             <div class="sc-card sc-card-pad h-100" [class.sc-down]="!s.up" [attr.data-testid]="'service-' + s.service">
               <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
@@ -174,7 +176,10 @@ interface Snapshot {
 })
 export class AdminServicesPage {
   private readonly api = inject(ServicesService);
-  protected readonly info = INFO;
+  /** A service this page doesn't know yet (added in the backend later) gets a plain card, not a crash. */
+  protected infoFor(name: string) {
+    return INFO[name as ServiceStatus['service']] ?? { title: `${name} service`, icon: 'grid' as IconName, port: 0, owns: '', script: `npm run dev -w @scalecart/${name}` };
+  }
   protected readonly error = signal<string | null>(null);
 
   protected readonly data = toSignal<Snapshot | null>(

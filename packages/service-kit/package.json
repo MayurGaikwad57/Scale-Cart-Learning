@@ -1,0 +1,29 @@
+{
+  "name": "@scalecart/service-kit",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The microservice chassis every ScaleCart service shares: Express skeleton, health checks, request ids, errors, auth, service calls, ScaleKV/ScaleLog clients, consumer runtime",
+  "type": "module",
+  "exports": {
+    "./*": {
+      "development": "./src/*.ts",
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.5",
+    "express": "^5.2.1",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^26.6.3"
+  }
+}

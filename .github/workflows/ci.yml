@@ -1,0 +1,101 @@
+# CI for the ScaleCart monorepo.
+#
+#   checks   boundary check + type-check + EVERY test, against a real PostgreSQL (one database and
+#            one database user per service, created exactly like on a developer machine)
+#   changes  which apps did this push touch?  (a change in packages/ or a shared build file -
+#            root package.json, lock file, tsconfig.base.json, .dockerignore, this workflow -
+#            touches every app)
+#   images   builds the container image of ONLY the changed apps, in parallel (one job per app)
+#
+# That is "a pipeline per service" in a monorepo: changing the payment service rebuilds the payment
+# image, not all nine. The images are built but not pushed (no registry configured yet).
+name: CI
+
+on:
+  push:
+    branches: [main, "m6.5-*"]
+  pull_request:
+
+# Least privilege for the GITHUB_TOKEN; paths-filter needs to read the PR's file list.
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      # Used by tools/create-service-dbs.ts to create the per-service databases + users.
+      ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.0
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Service boundaries (no app imports another app)
+        run: npm run check:boundaries
+      - name: One database + one user per service, signing key, tables
+        run: |
+          npm run db:create-service-dbs
+          npm run keys -w @scalecart/identity
+          npm run db:deploy
+      - name: Type-check (every app + the system tests)
+        run: npm run typecheck
+      - name: Tests (ScaleKV, ScaleLog, system tests across every service and database)
+        run: npm test
+
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            gateway: ["apps/gateway/**", "packages/**", "package.json", "package-lock.json", "tsconfig.base.json", ".dockerignore", ".github/workflows/ci.yml"]
+            identity: ["apps/identity/**", "packages/**", "package.json", "package-lock.json", "tsconfig.base.json", ".dockerignore", ".github/workflows/ci.yml"]
+            catalog: ["apps/catalog/**", "packages/**", "package.json", "package-lock.json", "tsconfig.base.json", ".dockerignore", ".github/workflows/ci.yml"]
+            order: ["apps/order/**", "packages/**", "package.json", "package-lock.json", "tsconfig.base.json", ".dockerignore", ".github/workflows/ci.yml"]
+            payment: ["apps/payment/**", "packages/**", "package.json", "package-lock.json", "tsconfig.base.json", ".dockerignore", ".github/workflows/ci.yml"]
+            inventory: ["apps/inventory/**", "packages/**", "package.json", "package-lock.json", "tsconfig.base.json", ".dockerignore", ".github/workflows/ci.yml"]
+            notification: ["apps/notification/**", "packages/**", "package.json", "package-lock.json", "tsconfig.base.json", ".dockerignore", ".github/workflows/ci.yml"]
+            scalekv: ["apps/scalekv/**", "packages/**", "package.json", "package-lock.json", "tsconfig.base.json", ".dockerignore", ".github/workflows/ci.yml"]
+            scalelog: ["apps/scalelog/**", "packages/**", "package.json", "package-lock.json", "tsconfig.base.json", ".dockerignore", ".github/workflows/ci.yml"]
+
+  images:
+    needs: [checks, changes]
+    if: ${{ needs.changes.outputs.apps != '[]' && needs.changes.outputs.apps != '' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.changes.outputs.apps) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the ${{ matrix.app }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          tags: scalecart/${{ matrix.app }}:${{ github.sha }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}

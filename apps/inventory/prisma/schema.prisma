@@ -1,0 +1,80 @@
+// INVENTORY SERVICE database (scalecart_inventory) - only the tables the inventory service OWNS.
+// No foreign keys to products: that table is in another service's database. productId is a
+// plain id; consistency comes from events (ProductCreated creates our inventory row).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Inventory {
+  productId String @id @map("product_id") @db.Uuid
+  available Int
+  reserved  Int    @default(0)
+  // Bumped on every change. Sent in StockChanged, so copies elsewhere can ignore older events.
+  version   Int    @default(0)
+
+  @@map("inventory")
+}
+
+// OUR COPY of the product facts we need (for low-stock alerts), from ProductCreated / ProductUpdated.
+model ProductInfo {
+  productId String   @id @map("product_id") @db.Uuid
+  sku       String
+  name      String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("product_info")
+}
+
+model StockAlert {
+  productId   String   @id @map("product_id") @db.Uuid
+  available   Int
+  lastOrderId String?  @map("last_order_id") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("stock_alerts")
+}
+
+enum ReservationStatus {
+  HELD // stock moved available -> reserved, waiting for the order's outcome
+  COMMITTED // order confirmed: the reserved units are sold (reserved -= qty)
+  RELEASED // order cancelled: units went back to available. Also a TOMBSTONE for a reservation
+  // whose release arrived before the reserve (a late reserve() is then refused).
+}
+
+model Reservation {
+  orderId   String            @id @map("order_id") @db.Uuid
+  status    ReservationStatus @default(HELD)
+  createdAt DateTime          @default(now()) @map("created_at")
+  updatedAt DateTime          @updatedAt @map("updated_at")
+  items     ReservationItem[]
+
+  // The sweeper's query: reservations HELD for too long.
+  @@index([status, createdAt])
+  @@map("reservations")
+}
+
+model ReservationItem {
+  orderId     String      @map("order_id") @db.Uuid
+  productId   String      @map("product_id") @db.Uuid
+  quantity    Int
+  reservation Reservation @relation(fields: [orderId], references: [orderId], onDelete: Cascade)
+
+  @@id([orderId, productId])
+  @@map("reservation_items")
+}
+
+// Idempotent consumer ("inventory" group): one row per event processed.
+model ProcessedEvent {
+  consumerGroup String   @map("consumer_group")
+  eventId       String   @map("event_id") @db.Uuid
+  processedAt   DateTime @default(now()) @map("processed_at")
+
+  @@id([consumerGroup, eventId])
+  @@map("processed_events")
+}

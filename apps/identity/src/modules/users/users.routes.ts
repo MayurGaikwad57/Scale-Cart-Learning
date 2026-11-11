@@ -1,0 +1,13 @@
+import { Router } from "express";
+import { authenticate } from "@scalecart/service-kit/auth";
+import { limits } from "@scalecart/service-kit/rate-limit";
+import { validateBody } from "@scalecart/service-kit/validate";
+import { usersController } from "./users.controller.js";
+import { loginSchema, registerSchema } from "./users.validation.js";
+
+export const authRouter = Router();
+// limits.auth: at most 10 attempts per minute per IP - slows down password guessing.
+authRouter.post("/register", limits.auth, validateBody(registerSchema), usersController.register);
+authRouter.post("/login", limits.auth, validateBody(loginSchema), usersController.login);
+// Lets the frontend restore the session after a page reload (token in storage -> who am I?).
+authRouter.get("/me", authenticate, usersController.me);
