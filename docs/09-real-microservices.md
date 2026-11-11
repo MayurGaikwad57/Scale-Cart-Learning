@@ -184,3 +184,32 @@ while coding) and as compiled JavaScript in production (`tsc -b` builds them fir
   idempotent retry replays even while the catalog is down; the boundary check also catches `import "x"` / `require()`.
 - Our own ScaleKV / ScaleLog instead of Redis / Kafka, everything on one machine (no Docker locally — CI builds
   the images). The **architecture** is real-world; the **infrastructure** is local.
+
+## M6.6 — justified refactoring (only changes backed by evidence)
+
+The rule: measure or point at a concrete defect first; change only what that evidence justifies.
+
+| Change | Evidence | Principle |
+|---|---|---|
+| Malformed JSON -> **400**, oversized body -> **413** (were 500) | reproduced live; now tested (mutation-checked) | correctness |
+| `once()`, the worker process, the DB handle -> **service-kit** | byte-identical in 2 / 5 / 6 apps | DRY - one fix, one place |
+| `orders.service.ts` (323 lines, 6 jobs) -> `checkout.saga.ts` (orchestration), `orders.service.ts` (state changes), `order.mapping.ts` (API + events), `orders.validation.ts`, `clients/inventory.client.ts` | six responsibilities in one file | Single responsibility; prepares M7's outbox |
+| Rate-limit **rules** out of the kit; each service declares + reports its own, the gateway aggregates | the shared library contained the order service's business policy | Dependency inversion - change a limit without releasing the kit |
+| Admin Events page renders the group directory from the API | its own copy of the list missed 2 new groups | Open/closed |
+| **One** parameterised `Dockerfile`; each image installs **only its app's** production dependencies | 9 near-copies (one already broke CI); gateway shipped Prisma/pg/bcrypt | DRY; measured: gateway `node_modules` 15 MB instead of 88 MB |
+
+**Measured and deliberately NOT changed - inventory reservation (one UPDATE per product under row locks):**
+
+| products | median | p95 |
+|---|---|---|
+| 1 | 9.6 ms | 15.7 ms |
+| 10 | 15.9 ms | 20.7 ms |
+| 100 (max) | 88.1 ms | 101.4 ms |
+
+~0.8 ms per product; most of the time is the fixed HTTP + transaction cost. A bulk `UPDATE` would save 1-7 ms on
+normal carts - not worth hand-written SQL in the most delicate code path.
+
+**Considered and rejected (no evidence of a problem):** a DI framework (plain parameters already inject what
+matters), repository interfaces over Prisma (tests run against real databases), splitting the events contract
+file, optimising `restoreCart` (a rare compensation path), moving the service registry out of the kit (listing
+the services IS its job, like DNS).
