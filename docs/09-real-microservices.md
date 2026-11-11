@@ -66,11 +66,32 @@ while coding) and as compiled JavaScript in production (`tsc -b` builds them fir
 | # | Phase | Done when |
 |---|---|---|
 | 1 | **Workspaces + shared packages** — root workspaces, `packages/service-kit`, `packages/events`; the chassis no longer knows Prisma or any service's consumer groups (they are passed in). No behaviour change. | ✅ all tests pass, `npm run dev` and compiled `npm start` work |
-| 2 | **One app per service** — `apps/<name>` with own `package.json`, env schema, scripts; owned modules move in; event handlers split per app; lint rule "no app imports another app" | each app builds and starts alone |
+| 2 | **One app per service** — `apps/<name>` with own `package.json`, env schema, scripts; owned modules move in; event handlers split per app; lint rule "no app imports another app" | ✅ see "Phase 2 — what changed" below |
 | 3 | **Database per service** — 4 databases + 4 DB users, own Prisma schema + migrations per app, no cross-DB foreign keys, own `processed_events`, `/internal/stock-alerts`, one-time data migration script (old DB kept as a backup) | each service can only reach its own DB; browser checkout works |
 | 4 | **Identity service** — users/auth out of order, own DB, RS256 + JWKS, gateway routes `/auth` → identity | login/register work; only identity holds the signing key |
 | 5 | **Catalog service** — products out of order, own DB, `ProductCreated/Updated` + `StockChanged` events, stock copy, cart/checkout call catalog, gateway routes `/products` → catalog | catalog, cart, checkout, admin product CRUD work end to end |
 | 6 | **Deploy per service** — Dockerfile per app, `docker-compose.yml`, GitHub Actions per app | CI green for every app |
+
+## Phase 2 — what changed
+
+- `apps/gateway`, `apps/order`, `apps/payment`, `apps/inventory`, `apps/notification`, `apps/scalekv`, `apps/scalelog`:
+  each has its own `package.json`, `tsconfig.json`, `.env` / `.env.example` (only the settings it needs) and scripts
+  (`npm run dev -w @scalecart/payment`, `build`, `start`, `worker`). `backend/` is gone.
+- **Boundary check** (`npm run check:boundaries`, `tools/check-boundaries.ts`): an app importing another app, or
+  reaching outside its folder, fails the build.
+- **Crossings removed:**
+  - inventory imported the order service's product-cache code -> inventory now publishes **`StockChanged`**
+    (topic `inventory`, key = productId) and the order service's new **`product_cache`** consumer group refreshes
+    its own cache. Product pages now catch up a few milliseconds later: *eventual consistency* (tests wait for it).
+  - checkout imported `PAYMENT_METHODS` from the payment code -> it is part of the order/payment **contract**
+    (`@scalecart/events`).
+  - one shared `handlers.ts` + `once()` + one global consumer-group table -> each app has its own handlers and
+    `once()`; the **consumer-group directory** (who consumes what, for the admin pages) is part of the contracts.
+- **Connection budget:** every service now has its own pool (`DATABASE_POOL_MAX`, default 10). Postgres allows ~100
+  connections in total, so replicas x pool size summed over all services must stay below that. The system tests run
+  every service in one process, so they use small pools and at most 3 test files at once.
+- `tests/system`: the whole-system tests, the only package allowed to import several apps.
+- Still shared (on purpose, until phase 3): the database, through the **temporary** `packages/legacy-db`.
 
 ## Known gaps (on purpose)
 

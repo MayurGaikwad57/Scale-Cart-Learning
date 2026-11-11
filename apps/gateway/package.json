@@ -1,0 +1,34 @@
+{
+  "name": "@scalecart/gateway",
+  "version": "1.0.0",
+  "private": true,
+  "description": "API gateway: the only door from outside. Routing, token check at the edge, rate limit.",
+  "type": "module",
+  "exports": {
+    "./*": {
+      "development": "./src/*.ts",
+      "default": "./dist/*.js"
+    }
+  },
+  "scripts": {
+    "dev": "tsx watch --conditions=development src/main.ts",
+    "start": "node dist/main.js",
+    "build": "tsc -b",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@scalecart/events": "*",
+    "@scalecart/service-kit": "*",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "helmet": "^8.3.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,9 +1,32 @@
 {
   "name": "scalecart",
   "private": true,
-  "description": "ScaleCart monorepo: deployable apps + small shared packages (npm workspaces)",
+  "description": "ScaleCart monorepo: one folder per deployable service (apps/*) + small shared packages (packages/*)",
+  "type": "module",
   "workspaces": [
     "packages/*",
-    "backend"
-  ]
+    "apps/*",
+    "tests/*"
+  ],
+  "scripts": {
+    "dev": "tsx tools/dev-all.ts",
+    "start:all": "tsx tools/dev-all.ts --compiled",
+    "build": "npm run db:generate && tsc -b apps/gateway apps/order apps/payment apps/inventory apps/notification apps/scalekv apps/scalelog",
+    "typecheck": "npm run build && tsc -p tests/system",
+    "test": "npm test -w @scalecart/scalekv -w @scalecart/scalelog -w @scalecart/system-tests",
+    "check:boundaries": "tsx tools/check-boundaries.ts",
+    "kv": "npm run dev -w @scalecart/scalekv",
+    "kv:cli": "npm run cli -w @scalecart/scalekv",
+    "log": "npm run dev -w @scalecart/scalelog",
+    "log:cli": "npm run cli -w @scalecart/scalelog --",
+    "seed": "npm run seed -w @scalecart/order",
+    "db:generate": "npm run db:generate -w @scalecart/legacy-db",
+    "db:migrate": "npm run db:migrate -w @scalecart/legacy-db",
+    "db:deploy": "npm run db:deploy -w @scalecart/legacy-db"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
 }

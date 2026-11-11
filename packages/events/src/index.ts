@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 /**
  * THE EVENT CATALOG: every event ScaleCart publishes. An event is a FACT about the past
@@ -21,6 +21,7 @@ import { createHash } from "node:crypto";
 
 export const ORDERS_TOPIC = "orders";
 export const PAYMENTS_TOPIC = "payments";
+export const INVENTORY_TOPIC = "inventory";
 export const TOPIC_PARTITIONS = 3;
 
 export interface EventEnvelope<TType extends string, TData> {
@@ -74,9 +75,24 @@ export interface PaymentResultData {
 export type PaymentSucceeded = EventEnvelope<"PaymentSucceeded", PaymentResultData>;
 export type PaymentFailed = EventEnvelope<"PaymentFailed", PaymentResultData>;
 
+/**
+ * StockChanged (M6.5): the inventory service changed how much of some products can be sold.
+ * Published on the "inventory" topic, key = productId. Whoever shows stock (the product pages,
+ * owned by the order service today, by the catalog service later) refreshes its own copy / cache.
+ * Before M6.5 the inventory service reached into the order service's cache code instead - a
+ * service must never import another service's code.
+ */
+export interface StockChangedData {
+  productId: string;
+  /** reservation = an order reserved/released stock; admin = an admin set the stock level. */
+  cause: "reservation" | "admin";
+}
+export type StockChanged = EventEnvelope<"StockChanged", StockChangedData>;
+
 export type OrderEvent = OrderCreated | OrderConfirmed | OrderCancelled;
 export type PaymentEvent = PaymentSucceeded | PaymentFailed;
-export type AnyEvent = OrderEvent | PaymentEvent;
+export type InventoryEvent = StockChanged;
+export type AnyEvent = OrderEvent | PaymentEvent | InventoryEvent;
 
 /**
  * DETERMINISTIC EVENT IDS. "Order X was confirmed" is ONE fact, however many times we publish it.
@@ -93,7 +109,7 @@ export function deterministicEventId(...parts: string[]) {
 
 export function makeEvent<E extends AnyEvent>(type: E["type"], version: number, data: E["data"], id?: string): E {
   return {
-    eventId: id ?? deterministicEventId(type, (data as { orderId: string }).orderId),
+    eventId: id ?? deterministicEventId(type, (data as { orderId?: string }).orderId ?? randomUUID()),
     type,
     version,
     occurredAt: new Date().toISOString(),
@@ -101,3 +117,54 @@ export function makeEvent<E extends AnyEvent>(type: E["type"], version: number, 
   } as E;
 }
 
+
+/**
+ * Turns any order event into "how did this order END?", or null if it hasn't ended yet.
+ *   v2 OrderCreated (PENDING)      -> null: payment hasn't happened, nothing to tell anyone yet
+ *   OrderConfirmed / OrderCancelled -> the outcome (M6)
+ *   v1 OrderCreated CONFIRMED/CANCELLED -> the outcome (M5 events still in the log, or replayed)
+ */
+export function outcomeOf(e: OrderEvent): { confirmed: boolean; reason: string | null } | null {
+  if (e.type === "OrderConfirmed") return { confirmed: true, reason: null };
+  if (e.type === "OrderCancelled") return { confirmed: false, reason: e.data.reason };
+  if (e.type === "OrderCreated" && e.data.status !== "PENDING") {
+    return { confirmed: e.data.status === "CONFIRMED", reason: e.data.status === "CANCELLED" ? "payment_declined" : null };
+  }
+  return null;
+}
+
+/**
+ * THE CONSUMER-GROUP DIRECTORY: who listens to which topic, and which service runs the group.
+ * Part of the contract (like an AsyncAPI document): the admin pages show it, and every service
+ * wires ITS OWN groups to ITS OWN handlers. The handler code itself lives in the owning service.
+ */
+export const SERVICES = ["order", "payment", "inventory", "notification"] as const;
+export type Service = (typeof SERVICES)[number];
+
+export const CONSUMER_GROUPS = ["payment", "order", "inventory", "notification", "analytics", "product_cache"] as const;
+export type ConsumerGroup = (typeof CONSUMER_GROUPS)[number];
+
+export const GROUPS: Record<ConsumerGroup, { topic: string; service: Service; description: string }> = {
+  payment: { topic: ORDERS_TOPIC, service: "payment", description: "OrderCreated -> charge the card -> PaymentSucceeded / PaymentFailed" },
+  order: { topic: PAYMENTS_TOPIC, service: "order", description: "Payment result -> order CONFIRMED / CANCELLED -> OrderConfirmed / OrderCancelled" },
+  inventory: { topic: ORDERS_TOPIC, service: "inventory", description: "OrderConfirmed -> stock sold; OrderCancelled -> stock released; low-stock alerts" },
+  notification: { topic: ORDERS_TOPIC, service: "notification", description: "OrderConfirmed / OrderCancelled -> the customer's notification bell" },
+  analytics: { topic: ORDERS_TOPIC, service: "order", description: "OrderConfirmed / OrderCancelled -> daily sales projection" },
+  "product_cache": { topic: INVENTORY_TOPIC, service: "order", description: "StockChanged -> refresh the cached product pages that show stock" },
+};
+
+export const groupsOfService = (service: Service) => CONSUMER_GROUPS.filter((g) => GROUPS[g].service === service);
+export const dlqTopicOf = (group: ConsumerGroup) => `${GROUPS[group].topic}.${group}.dlq`;
+
+/** Build a consumer definition (the shape the service-kit's consumer runtime takes) from the directory. */
+export const consumerDef = (group: ConsumerGroup, handler: () => Promise<(event: never) => Promise<unknown>>) => ({
+  group,
+  topic: GROUPS[group].topic,
+  partitions: TOPIC_PARTITIONS,
+  description: GROUPS[group].description,
+  handler: handler as () => Promise<(event: unknown) => Promise<unknown>>,
+});
+
+/** The payment methods the payment service understands - the order service accepts only these. */
+export const PAYMENT_METHODS = ["TEST_CARD_SUCCESS", "TEST_CARD_DECLINE"] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];

@@ -1,0 +1,37 @@
+{
+  "name": "@scalecart/order",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Order service: cart, checkout saga, orders, analytics (+ users and products until the identity and catalog services exist).",
+  "type": "module",
+  "exports": {
+    "./*": {
+      "development": "./src/*.ts",
+      "default": "./dist/*.js"
+    }
+  },
+  "scripts": {
+    "dev": "tsx watch --conditions=development src/main.ts",
+    "start": "node dist/main.js",
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "worker": "tsx --conditions=development src/worker.ts",
+    "seed": "tsx --conditions=development src/scripts/seed.ts"
+  },
+  "dependencies": {
+    "@scalecart/events": "*",
+    "@scalecart/legacy-db": "*",
+    "@scalecart/service-kit": "*",
+    "bcryptjs": "^3.0.3",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

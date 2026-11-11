@@ -1308,7 +1308,7 @@ Use these exact checkpoints.
 ## M6.5 — Real microservices (docs/09-real-microservices.md)
 
 * [x] Phase 1: npm workspaces + shared packages (service-kit chassis, event contracts)
-* [ ] Phase 2: one app per service
+* [x] Phase 2: one app per service
 * [ ] Phase 3: database per service
 * [ ] Phase 4: identity service (RS256 + JWKS)
 * [ ] Phase 5: catalog service
