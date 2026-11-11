@@ -19,9 +19,10 @@ FROM ${NODE_IMAGE} AS build
 # Prisma's migrate engine needs OpenSSL, which Alpine doesn't ship (migrations run in THIS stage).
 RUN apk add --no-cache openssl
 WORKDIR /repo
-ARG APP
 # Manifests first, sources later: Docker caches the `npm ci` layer until a package.json or the lock
 # file changes. (npm ci needs EVERY workspace's package.json: the lock file describes the monorepo.)
+# `ARG APP` comes only AFTER npm ci: an ARG is part of the cache key of every later RUN, so declaring
+# it earlier would make this identical install a separate cache entry per app (9 installs, not 1).
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/service-kit/package.json packages/service-kit/
 COPY packages/events/package.json packages/events/
@@ -35,8 +36,10 @@ COPY apps/notification/package.json apps/notification/
 COPY apps/scalekv/package.json apps/scalekv/
 COPY apps/scalelog/package.json apps/scalelog/
 COPY tests/system/package.json tests/system/
+# The npm cache is a BuildKit cache mount: packages are downloaded once and reused by later builds.
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
+ARG APP
 RUN test -n "$APP" || (echo "build with --build-arg APP=<app>" && exit 1)
-RUN npm ci --no-audit --no-fund
 COPY packages/ packages/
 COPY apps/${APP}/ apps/${APP}/
 # Builds this app AND the shared packages it references (tsc -b follows the project references).
@@ -62,11 +65,11 @@ COPY apps/scalelog/package.json apps/scalelog/
 COPY tests/system/package.json tests/system/
 # --omit=optional too: the Prisma CLI and TypeScript are OPTIONAL PEERS of @prisma/client and would
 # otherwise stay. Folders npm may nest dependencies in must exist for the COPY below.
-RUN npm ci --omit=dev --omit=optional -w @scalecart/${APP} --no-audit --no-fund \
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev --omit=optional -w @scalecart/${APP} --no-audit --no-fund \
  && mkdir -p apps/${APP}/node_modules packages/service-kit/node_modules packages/events/node_modules
 
 # ---------- stage 3: run ----------
-FROM ${NODE_IMAGE}
+FROM ${NODE_IMAGE} AS runtime
 # tini = a tiny init process as PID 1: it forwards SIGTERM to node and reaps zombie processes.
 # (Our services also handle SIGTERM themselves - graceful shutdown - see service-app.ts.)
 RUN apk add --no-cache tini
@@ -75,10 +78,14 @@ ARG ENTRY=main
 ARG PORT
 # The HTTP health path; ScaleKV / ScaleLog speak RESP, not HTTP: built with HEALTH_PATH="" (no check).
 ARG HEALTH_PATH=/health
+# KV_HOST / LOG_HOST: ScaleKV and ScaleLog default to 127.0.0.1 (safe on a laptop); in a container that
+# would mean "only reachable from inside this container". Every other app ignores these two settings.
 ENV NODE_ENV=production \
     APP_ENTRY=${ENTRY} \
     HEALTH_PORT=${PORT} \
-    HEALTH_PATH=${HEALTH_PATH}
+    HEALTH_PATH=${HEALTH_PATH} \
+    KV_HOST=0.0.0.0 \
+    LOG_HOST=0.0.0.0
 WORKDIR /repo
 COPY --from=prod-deps /repo/package.json ./
 COPY --from=prod-deps /repo/node_modules ./node_modules
@@ -103,3 +110,14 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=3 \
   CMD [ -z "$HEALTH_PATH" ] || wget -qO- "http://127.0.0.1:${HEALTH_PORT}${HEALTH_PATH}" > /dev/null || exit 1
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["sh", "-c", "exec node dist/${APP_ENTRY}.js"]
+
+# ---------- stage 4 (opt-in): the same image + a declared DATA VOLUME ----------
+# For STATEFUL apps (ScaleLog keeps its partition files in data/): build with --target stateful so the
+# data lives in a volume, not in the container's throw-away layer. The stateless services use the
+# default target (the stage above) and get no volume.
+FROM runtime AS stateful
+ARG APP
+VOLUME ["/repo/apps/${APP}/data"]
+
+# The DEFAULT target is the last stage: the plain runtime image.
+FROM runtime

@@ -13,7 +13,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "m6.5-*"]
+    branches: [main] # feature branches are checked through their pull request
   pull_request:
 
 # Least privilege for the GITHUB_TOKEN; paths-filter needs to read the PR's file list.
@@ -96,8 +96,9 @@ jobs:
           case "${{ matrix.app }}" in
             gateway) port=3000 ;; identity) port=3005 ;; catalog) port=3006 ;; order) port=3001 ;;
             payment) port=3002 ;; inventory) port=3003 ;; notification) port=3004 ;;
-            scalekv) port=6380; entry=kv-server; health="" ;; scalelog) port=9093; entry=log-server; health="" ;;
+            scalekv) port=6380; entry=kv-server; health="" ;; scalelog) port=9093; entry=log-server; health=""; target=stateful ;;
           esac
+          echo "target=${target:-runtime}" >> "$GITHUB_OUTPUT"
           {
             echo "args<<EOF"
             echo "APP=${{ matrix.app }}"
@@ -111,6 +112,7 @@ jobs:
         with:
           context: .
           file: Dockerfile
+          target: ${{ steps.args.outputs.target }}
           build-args: ${{ steps.args.outputs.args }}
           tags: scalecart/${{ matrix.app }}:${{ github.sha }}
           push: false
@@ -122,8 +124,16 @@ jobs:
           img=scalecart/${{ matrix.app }}:${{ github.sha }}
           echo "image size: $(docker image inspect "$img" --format '{{.Size}}' | awk '{printf "%.0f MB", $1/1000000}')"
           docker run --rm --entrypoint sh "$img" -c 'echo "node_modules: $(du -sh /repo/node_modules | cut -f1)"; echo "packages: $(ls /repo/node_modules | wc -l)"; id -un'
-          # Start the app for a few seconds: every import must resolve after the PER-APP install. Without a
-          # database URL a service stops with a config error - fine; a missing package fails the job.
-          out=$(docker run --rm --entrypoint sh "$img" -c 'timeout 8 node "dist/${APP_ENTRY}.js" 2>&1; true')
-          echo "$out" | tail -5
-          if echo "$out" | grep -qE "ERR_MODULE_NOT_FOUND|Cannot find (package|module)"; then echo "missing dependency in the image"; exit 1; fi
+          # START CHECK: run the app until it LISTENS, so its whole startup path loads with the per-app
+          # dependencies. Dummy settings: database URLs that are never contacted (Prisma connects on
+          # the first query) and a throw-away signing key for identity.
+          key=$(openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 2>/dev/null | base64 -w0)
+          dummy=postgresql://x:x@127.0.0.1:9/x
+          out=$(docker run --rm --entrypoint sh \
+            -e IDENTITY_DATABASE_URL=$dummy -e CATALOG_DATABASE_URL=$dummy -e ORDER_DATABASE_URL=$dummy \
+            -e PAYMENT_DATABASE_URL=$dummy -e INVENTORY_DATABASE_URL=$dummy -e NOTIFICATION_DATABASE_URL=$dummy \
+            -e JWT_PRIVATE_KEY="$key" -e JWT_KEY_ID=ci \
+            "$img" -c 'timeout 8 node "dist/${APP_ENTRY}.js" 2>&1; true')
+          echo "$out" | tail -6
+          if echo "$out" | grep -qE "ERR_MODULE_NOT_FOUND|Cannot find (package|module)"; then echo "::error::missing dependency in the image"; exit 1; fi
+          if ! echo "$out" | grep -q "listening"; then echo "::error::the app did not reach 'listening'"; exit 1; fi

@@ -2,6 +2,11 @@ import type { ErrorRequestHandler } from "express";
 import { ZodError } from "zod";
 import { HttpError } from "./errors.js";
 
+const BODY_ERRORS: Record<string, string> = {
+  "entity.parse.failed": "The request body is not valid JSON.",
+  "entity.too.large": "The request is too large.",
+};
+
 // Every error ends here, so clients always get the same JSON shape: { error, message?, details? }.
 export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (err instanceof ZodError) {
@@ -18,7 +23,9 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   // "entity.too.large"). Before, they fell through to 500 - "our bug" - which they are not.
   const e = err as { status?: unknown; expose?: unknown; type?: unknown };
   if (e.expose === true && typeof e.status === "number" && e.status >= 400 && e.status < 500) {
-    return res.status(e.status).json({ error: typeof e.type === "string" ? e.type : "bad_request" });
+    const code = typeof e.type === "string" ? e.type : "bad_request";
+    // Same { error, message } shape as every other error, so the UI can show a readable sentence.
+    return res.status(e.status).json({ error: code, message: BODY_ERRORS[code] ?? "The request could not be read." });
   }
   // Unexpected: log the real error, never leak internals to the client.
   console.error(err);

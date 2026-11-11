@@ -209,6 +209,13 @@ The rule: measure or point at a concrete defect first; change only what that evi
 ~0.8 ms per product; most of the time is the fixed HTTP + transaction cost. A bulk `UPDATE` would save 1-7 ms on
 normal carts - not worth hand-written SQL in the most delicate code path.
 
+**Fixed from the PR #7 code review** (a refactor must not change behaviour - the first one did): the single
+Dockerfile had lost ScaleKV/ScaleLog's `0.0.0.0` listen address and ScaleLog's data volume (now in the image;
+ScaleLog builds with `--target stateful`); `ARG APP` moved below `npm ci` (one cached install instead of nine) and
+an npm cache mount; the CI start check now runs every image until it prints "listening" (dummy settings); rate-limit
+rule names are namespaced `<service>.<rule>` and a clash fails at startup; the 400/413 answers carry a readable
+`message`; `prismaDb` moved to `service-kit/db.ts` (seed scripts no longer load the HTTP chassis).
+
 **Considered and rejected (no evidence of a problem):** a DI framework (plain parameters already inject what
 matters), repository interfaces over Prisma (tests run against real databases), splitting the events contract
 file, optimising `restoreCart` (a rare compensation path), moving the service registry out of the kit (listing

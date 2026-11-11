@@ -89,13 +89,13 @@ export function createGatewayApp() {
   app.use("/internal", (_req, res) => res.status(404).json({ error: "not_found" }));
 
   // THE GATEWAY's policy: every API call, per IP - stops one client from flooding the whole API.
-  app.use(rateLimit({ name: "global", limit: 300, windowMs: 60_000, keyBy: byIp, appliesTo: "every API request" }));
+  app.use(rateLimit({ name: "gateway.global", limit: 300, windowMs: 60_000, keyBy: byIp, appliesTo: "every API request" }));
 
   // Admin > Services: the gateway's own endpoint (it is the one component that sees every service).
   app.get("/admin/services", ...edgeAuth.admin, async (_req, res) => {
     const services = await Promise.all(SERVICE_NAMES.map(probe));
     res.json({
-      gateway: { pid: process.pid, uptimeSeconds: Math.round(process.uptime()), kv: kv.status, rateLimits: enforcedRules },
+      gateway: { pid: process.pid, uptimeSeconds: Math.round(process.uptime()), kv: kv.status, rateLimits: enforcedRules() },
       services: services.map((s) => {
         const st = proxyStats[s.service];
         return {

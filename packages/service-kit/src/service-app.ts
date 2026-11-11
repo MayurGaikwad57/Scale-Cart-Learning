@@ -3,6 +3,7 @@ import express, { type Express } from "express";
 import helmet from "helmet";
 import { broker } from "./broker.js";
 import { runningConsumers, startConsumers, stopConsumers, type ConsumerDef } from "./consumers.js";
+import type { ServiceDb } from "./db.js";
 import { kitEnv as env } from "./env.js";
 import { enforcedRules } from "./rate-limit.js";
 import { errorHandler } from "./error-handler.js";
@@ -18,17 +19,7 @@ import { requestContext } from "./request-context.js";
  * The chassis knows nothing about any service's database or events: the service PASSES IN its
  * database (for the readiness check and shutdown) and its consumer groups.
  */
-export interface ServiceDb {
-  /** Throws if the database can't be reached (e.g. SELECT 1). */
-  ping: () => Promise<unknown>;
-  disconnect: () => Promise<void>;
-}
-
-/** The ServiceDb of a Prisma client (any service's generated client has these two methods). */
-export const prismaDb = (client: { $queryRawUnsafe(sql: string): Promise<unknown>; $disconnect(): Promise<void> }): ServiceDb => ({
-  ping: () => client.$queryRawUnsafe("SELECT 1"),
-  disconnect: () => client.$disconnect(),
-});
+export type { ServiceDb };
 
 export function createServiceApp(name: ServiceName, mount: (app: Express) => void, opts: { db?: ServiceDb } = {}): Express {
   const app = express();
@@ -57,7 +48,7 @@ export function createServiceApp(name: ServiceName, mount: (app: Express) => voi
       await opts.db?.ping();
       // rateLimits: the rules THIS service enforces (its own policy) - the gateway's /admin/services
       // collects them from every service for the admin pages.
-      res.json({ status: "ready", service: name, pid: process.pid, uptimeSeconds: Math.round(process.uptime()), kv: kv.status, log: broker.conn.status, consumers, rateLimits: enforcedRules });
+      res.json({ status: "ready", service: name, pid: process.pid, uptimeSeconds: Math.round(process.uptime()), kv: kv.status, log: broker.conn.status, consumers, rateLimits: enforcedRules() });
     } catch {
       res.status(503).json({ status: "db_unavailable", service: name, pid: process.pid });
     }

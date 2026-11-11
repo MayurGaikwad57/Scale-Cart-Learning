@@ -58,14 +58,10 @@ services:
   scalekv:
     <<: *restart
     build: { context: ., args: { APP: scalekv, PORT: "6380", ENTRY: kv-server, HEALTH_PATH: "" } }
-    environment:
-      KV_HOST: 0.0.0.0 # listen on the container network, not only inside the container
 
   scalelog:
     <<: *restart
-    build: { context: ., args: { APP: scalelog, PORT: "9093", ENTRY: log-server, HEALTH_PATH: "" } }
-    environment:
-      LOG_HOST: 0.0.0.0
+    build: { context: ., target: stateful, args: { APP: scalelog, PORT: "9093", ENTRY: log-server, HEALTH_PATH: "" } } # stateful: declares the data volume
     volumes:
       - scalelog-data:/repo/apps/scalelog/data # the partition logs survive a container restart
 

@@ -2,7 +2,7 @@ import { broker } from "./broker.js";
 import { startConsumers, stopConsumers, type ConsumerDef } from "./consumers.js";
 import { kitEnv as env } from "./env.js";
 import { kv } from "./kv.js";
-import type { ServiceDb } from "./service-app.js";
+import type { ServiceDb } from "./db.js";
 
 /**
  * An EXTRA consumer process for one service's groups (no HTTP):   npm run worker -w @scalecart/<service>

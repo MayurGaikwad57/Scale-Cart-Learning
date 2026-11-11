@@ -1,5 +1,5 @@
 import { PrismaPg } from "@prisma/adapter-pg";
-import { prismaDb } from "@scalecart/service-kit/service-app";
+import { prismaDb } from "@scalecart/service-kit/db";
 import { PrismaClient } from "../generated/prisma/client.js";
 import { env } from "./env.js";
 

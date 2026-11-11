@@ -45,17 +45,34 @@ export const byIp = (req: Request) => `ip:${req.ip}`;
  * OWN rules (its policy) and reports them in /health/ready - so changing the checkout limit is a
  * change to the order service alone, not to a library every service ships.
  */
-export const enforcedRules: { name: string; limit: number; window: string; per: string; appliesTo: string }[] = [];
+type RuleInfo = { name: string; limit: number; window: string; per: string; appliesTo: string };
+const registry = new Map<string, RuleInfo>();
+/** The rules this process enforces (each listed once, however often an app is created). */
+export const enforcedRules = () => [...registry.values()];
+
+/**
+ * The rule NAME is the counter's namespace in the shared ScaleKV (rl:<name>:<who>), so it must be
+ * unique across ALL services: "<service>.<rule>", e.g. "order.checkout". Two different rules with one
+ * name in a process fail at startup - and the system tests run every service in one process, so a
+ * clash between services fails the tests instead of silently sharing a counter in production.
+ */
+const NAME = /^[a-z]+\.[a-z0-9_-]+$/;
 
 export function rateLimit(rule: RateLimitRule): RequestHandler {
   const keyBy = rule.keyBy ?? defaultKey;
-  enforcedRules.push({
+  if (!NAME.test(rule.name)) throw new Error(`rate-limit rule "${rule.name}": name it "<service>.<rule>" (e.g. "order.checkout")`);
+  const info: RuleInfo = {
     name: rule.name,
     limit: rule.limit,
     window: rule.windowMs === 60_000 ? "1 minute" : `${rule.windowMs / 1000} seconds`,
     per: rule.per ?? (rule.keyBy === byIp ? "IP address" : "user"),
     appliesTo: rule.appliesTo ?? "",
-  });
+  };
+  const existing = registry.get(rule.name);
+  if (existing && JSON.stringify(existing) !== JSON.stringify(info)) {
+    throw new Error(`rate-limit rule "${rule.name}" is defined twice with different settings - rule names must be unique`);
+  }
+  registry.set(rule.name, info);
 
   return async (req, res, next) => {
     if (!kv.isReady) return next(); // fail open

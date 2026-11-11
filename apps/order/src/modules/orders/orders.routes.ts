@@ -15,7 +15,7 @@ ordersRouter.use(authenticate);
 // second order: they get the original response back (with "Idempotent-Replayed: true").
 // THIS service's policy: 10 checkouts per minute per user - placing orders is expensive (row locks,
 // a call to the inventory service, a payment).
-const checkoutLimit = rateLimit({ name: "orders", limit: 10, windowMs: 60_000, appliesTo: "placing orders" });
+const checkoutLimit = rateLimit({ name: "order.checkout", limit: 10, windowMs: 60_000, appliesTo: "placing orders" });
 
 ordersRouter.post("/", checkoutLimit, validateBody(createOrderSchema), async (req, res) => {
   const userId = req.user!.id;
