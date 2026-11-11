@@ -1,5 +1,9 @@
 # 08 — M6 Microservices: API gateway + payment, inventory and notification services
 
+> **M6.5 update:** the code moved. `backend/src/services/<name>` is now `apps/<name>/src`, shared code is in
+> `packages/service-kit`, event contracts in `packages/events`; run everything with `npm run dev` from the repo root.
+> See `docs/09-real-microservices.md`.
+
 **Goal (project-plan §11–12):** extract services from the modular monolith *gradually* — no rewrite — and put an
 API gateway in front. **Constraint:** nothing can be installed (no Docker, no Kubernetes, no nginx). **Decision:** every
 service is a separate Node process with its own port, started from the same repo; the gateway is our own reverse

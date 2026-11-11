@@ -1,0 +1,114 @@
+// ORDER SERVICE database (scalecart_order) - only the tables the order service OWNS.
+// No other service can connect to this database (own DB user, CONNECT revoked from everyone else).
+// Users live in the IDENTITY service's database (phase 4) and products in the CATALOG service's
+// (phase 5): here they are just ids on carts and orders - no foreign keys - plus a snapshot of the
+// product on every order line.
+// Money is stored as integer cents. IDs are UUIDs.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+model Cart {
+  id     String     @id @default(uuid()) @db.Uuid
+  // The identity service's user id (from the verified token). No foreign key: users are in another database.
+  userId String     @unique @map("user_id") @db.Uuid
+  items  CartItem[]
+
+  @@map("cart")
+}
+
+model CartItem {
+  id        String  @id @default(uuid()) @db.Uuid
+  cartId    String  @map("cart_id") @db.Uuid
+  // The catalog service's product id (no foreign key - another database). Name, price and stock are
+  // asked from the catalog when the cart is shown.
+  productId String  @map("product_id") @db.Uuid
+  quantity  Int
+  cart      Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, productId])
+  @@map("cart_items")
+}
+
+model Order {
+  id                     String        @id @default(uuid()) @db.Uuid
+  userId                 String        @map("user_id") @db.Uuid
+  status                 OrderStatus   @default(PENDING)
+  totalCents             Int           @map("total_cents")
+  // Idempotent order creation. Unique per user so keys can't collide across users.
+  idempotencyKey         String?       @map("idempotency_key")
+  // SHA-256 of the request body that used the key: same key + DIFFERENT body = client bug (422).
+  idempotencyFingerprint String?       @map("idempotency_fingerprint")
+  // The ORDER SERVICE's own copy of what it knows about the payment, learned from the
+  // PaymentSucceeded / PaymentFailed events (the payments table is in the payment service's DB).
+  paymentMethod          String?       @map("payment_method")
+  paymentStatus          PaymentStatus @default(PENDING) @map("payment_status")
+  // Why a CANCELLED order was cancelled: payment_declined | inventory_unavailable | reservation_released
+  statusReason           String?       @map("status_reason")
+  createdAt              DateTime      @default(now()) @map("created_at")
+
+  items OrderItem[]
+
+  @@unique([userId, idempotencyKey])
+  // Serves order history: newest orders for a user.
+  @@index([userId, createdAt(sort: Desc)])
+  // The reconciler's query "PENDING orders older than N seconds".
+  @@index([status, createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id             String  @id @default(uuid()) @db.Uuid
+  orderId        String  @map("order_id") @db.Uuid
+  // The catalog service's product id. No foreign key: products live in the catalog's database.
+  productId      String  @map("product_id") @db.Uuid
+  quantity       Int
+  // SNAPSHOT at checkout (from the catalog service): a past order never changes when a product is
+  // renamed, re-priced or deleted later - and showing an order never needs the catalog.
+  unitPriceCents  Int    @map("unit_price_cents")
+  productName     String @map("product_name")
+  productSku      String @map("product_sku")
+  productCategory String @map("product_category")
+  order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+// Idempotent consumers ("order" and "analytics" groups): one row per (group, event) processed.
+model ProcessedEvent {
+  consumerGroup String   @map("consumer_group")
+  eventId       String   @map("event_id") @db.Uuid
+  processedAt   DateTime @default(now()) @map("processed_at")
+
+  @@id([consumerGroup, eventId])
+  @@map("processed_events")
+}
+
+// READ MODEL built by the "analytics" consumer from order events.
+model SalesDaily {
+  day             DateTime @id @db.Date
+  confirmedOrders Int      @default(0) @map("confirmed_orders")
+  cancelledOrders Int      @default(0) @map("cancelled_orders")
+  revenueCents    BigInt   @default(0) @map("revenue_cents")
+
+  @@map("sales_daily")
+}

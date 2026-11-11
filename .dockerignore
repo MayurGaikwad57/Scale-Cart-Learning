@@ -1,0 +1,11 @@
+# Keep the build context small and secret-free.
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+**/.env
+**/src/generated
+apps/scalelog/data
+frontend
+docs
+.git
+.claude

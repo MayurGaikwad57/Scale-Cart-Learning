@@ -1,0 +1,31 @@
+{
+  "name": "@scalecart/scalelog",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ScaleLog: our own Kafka-like event log (topics, partitions, consumer groups, offsets, port 9093).",
+  "type": "module",
+  "exports": {
+    "./*": {
+      "development": "./src/*.ts",
+      "default": "./dist/*.js"
+    }
+  },
+  "scripts": {
+    "dev": "tsx --conditions=development src/log-server.ts",
+    "start": "node dist/log-server.js",
+    "cli": "tsx --conditions=development src/cli.ts --log",
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@scalecart/service-kit": "*",
+    "dotenv": "^18.0.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  }
+}

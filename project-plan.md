@@ -1305,6 +1305,15 @@ Use these exact checkpoints.
 * [x] Inventory Service
 * [x] Notification Service
 
+## M6.5 — Real microservices (docs/09-real-microservices.md)
+
+* [x] Phase 1: npm workspaces + shared packages (service-kit chassis, event contracts)
+* [x] Phase 2: one app per service
+* [x] Phase 3: database per service
+* [x] Phase 4: identity service (RS256 + JWKS)
+* [x] Phase 5: catalog service
+* [x] Phase 6: Dockerfile + CI per service (CI runs after push)
+
 ## M7 — Reliability
 
 * [ ] Outbox
