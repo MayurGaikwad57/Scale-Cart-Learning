@@ -175,11 +175,7 @@ while coding) and as compiled JavaScript in production (`tsc -b` builds them fir
 
 - **Dual write** (save to DB, then publish) can lose an event if the process dies in between — M7's **outbox**
   fixes it, per service.
-- Follow-ups from the PR #6 code review (valid, not done yet - they need a real Docker to verify):
-  each image's `node_modules` holds the production dependencies of ALL workspaces (prune per app instead);
-  the 9 Dockerfiles are near copies (one Dockerfile with `ARG APP/PORT/ENTRY`); the admin Events page keeps its
-  own list of consumer groups (build it from the API's `cluster.groups` instead); `once()`, `worker.ts` and the
-  order/payment `publishEvent` wrapper are copied per app (move them into the kit, the Prisma client passed in).
+- Follow-ups from the PR #6 code review - DONE in M6.6 (see "M6.6 — justified refactoring" below).
 - Fixed from the review: a lost `ProductCreated` is re-published by the catalog's **announcer** (`announced_at`);
   inventory publishes `StockChanged` in the background (never delaying a reservation's answer); the JWKS cache
   REPLACES its key set on each fetch (retired keys stop being trusted) and waits for an in-flight fetch (no

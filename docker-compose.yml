@@ -57,17 +57,21 @@ services:
 
   scalekv:
     <<: *restart
-    build: { context: ., dockerfile: apps/scalekv/Dockerfile }
+    build: { context: ., args: { APP: scalekv, PORT: "6380", ENTRY: kv-server, HEALTH_PATH: "" } }
+    environment:
+      KV_HOST: 0.0.0.0 # listen on the container network, not only inside the container
 
   scalelog:
     <<: *restart
-    build: { context: ., dockerfile: apps/scalelog/Dockerfile }
+    build: { context: ., args: { APP: scalelog, PORT: "9093", ENTRY: log-server, HEALTH_PATH: "" } }
+    environment:
+      LOG_HOST: 0.0.0.0
     volumes:
       - scalelog-data:/repo/apps/scalelog/data # the partition logs survive a container restart
 
   # ---- one-shot MIGRATION jobs: the build stage (it still has the Prisma CLI) runs `prisma migrate deploy`
   identity-migrate: &migrate
-    build: { context: ., dockerfile: apps/identity/Dockerfile, target: build }
+    build: { context: ., args: { APP: identity, PORT: "3005" }, target: build }
     command: npm run db:deploy -w @scalecart/identity
     environment:
       IDENTITY_DATABASE_URL: postgresql://identity_svc:${IDENTITY_DB_PASSWORD:-identity-dev-password}@postgres:5432/scalecart_identity
@@ -76,32 +80,32 @@ services:
     depends_on: { postgres: { condition: service_healthy } }
   catalog-migrate:
     <<: *migrate
-    build: { context: ., dockerfile: apps/catalog/Dockerfile, target: build }
+    build: { context: ., args: { APP: catalog, PORT: "3006" }, target: build }
     command: npm run db:deploy -w @scalecart/catalog
     environment:
       CATALOG_DATABASE_URL: postgresql://catalog_svc:${CATALOG_DB_PASSWORD:-catalog-dev-password}@postgres:5432/scalecart_catalog
       LOG_URL: kv://scalelog:9093
   order-migrate:
     <<: *migrate
-    build: { context: ., dockerfile: apps/order/Dockerfile, target: build }
+    build: { context: ., args: { APP: order, PORT: "3001" }, target: build }
     command: npm run db:deploy -w @scalecart/order
     environment:
       ORDER_DATABASE_URL: postgresql://order_svc:${ORDER_DB_PASSWORD:-order-dev-password}@postgres:5432/scalecart_order
   inventory-migrate:
     <<: *migrate
-    build: { context: ., dockerfile: apps/inventory/Dockerfile, target: build }
+    build: { context: ., args: { APP: inventory, PORT: "3003" }, target: build }
     command: npm run db:deploy -w @scalecart/inventory
     environment:
       INVENTORY_DATABASE_URL: postgresql://inventory_svc:${INVENTORY_DB_PASSWORD:-inventory-dev-password}@postgres:5432/scalecart_inventory
   payment-migrate:
     <<: *migrate
-    build: { context: ., dockerfile: apps/payment/Dockerfile, target: build }
+    build: { context: ., args: { APP: payment, PORT: "3002" }, target: build }
     command: npm run db:deploy -w @scalecart/payment
     environment:
       PAYMENT_DATABASE_URL: postgresql://payment_svc:${PAYMENT_DB_PASSWORD:-payment-dev-password}@postgres:5432/scalecart_payment
   notification-migrate:
     <<: *migrate
-    build: { context: ., dockerfile: apps/notification/Dockerfile, target: build }
+    build: { context: ., args: { APP: notification, PORT: "3004" }, target: build }
     command: npm run db:deploy -w @scalecart/notification
     environment:
       NOTIFICATION_DATABASE_URL: postgresql://notification_svc:${NOTIFICATION_DB_PASSWORD:-notification-dev-password}@postgres:5432/scalecart_notification
@@ -109,7 +113,7 @@ services:
   # ---- the services: each knows ONLY its own database
   identity:
     <<: *restart
-    build: { context: ., dockerfile: apps/identity/Dockerfile }
+    build: { context: ., args: { APP: identity, PORT: "3005" } }
     environment:
       <<: *service-env
       IDENTITY_DATABASE_URL: postgresql://identity_svc:${IDENTITY_DB_PASSWORD:-identity-dev-password}@postgres:5432/scalecart_identity
@@ -120,7 +124,7 @@ services:
 
   catalog:
     <<: *restart
-    build: { context: ., dockerfile: apps/catalog/Dockerfile }
+    build: { context: ., args: { APP: catalog, PORT: "3006" } }
     environment:
       <<: *service-env
       CATALOG_DATABASE_URL: postgresql://catalog_svc:${CATALOG_DB_PASSWORD:-catalog-dev-password}@postgres:5432/scalecart_catalog
@@ -128,7 +132,7 @@ services:
 
   order:
     <<: *restart
-    build: { context: ., dockerfile: apps/order/Dockerfile }
+    build: { context: ., args: { APP: order, PORT: "3001" } }
     environment:
       <<: *service-env
       ORDER_DATABASE_URL: postgresql://order_svc:${ORDER_DB_PASSWORD:-order-dev-password}@postgres:5432/scalecart_order
@@ -136,7 +140,7 @@ services:
 
   payment:
     <<: *restart
-    build: { context: ., dockerfile: apps/payment/Dockerfile }
+    build: { context: ., args: { APP: payment, PORT: "3002" } }
     environment:
       <<: *service-env
       PAYMENT_DATABASE_URL: postgresql://payment_svc:${PAYMENT_DB_PASSWORD:-payment-dev-password}@postgres:5432/scalecart_payment
@@ -144,7 +148,7 @@ services:
 
   inventory:
     <<: *restart
-    build: { context: ., dockerfile: apps/inventory/Dockerfile }
+    build: { context: ., args: { APP: inventory, PORT: "3003" } }
     environment:
       <<: *service-env
       INVENTORY_DATABASE_URL: postgresql://inventory_svc:${INVENTORY_DB_PASSWORD:-inventory-dev-password}@postgres:5432/scalecart_inventory
@@ -152,7 +156,7 @@ services:
 
   notification:
     <<: *restart
-    build: { context: ., dockerfile: apps/notification/Dockerfile }
+    build: { context: ., args: { APP: notification, PORT: "3004" } }
     environment:
       <<: *service-env
       NOTIFICATION_DATABASE_URL: postgresql://notification_svc:${NOTIFICATION_DB_PASSWORD:-notification-dev-password}@postgres:5432/scalecart_notification
@@ -161,7 +165,7 @@ services:
   # ---- the only door from outside
   gateway:
     <<: *restart
-    build: { context: ., dockerfile: apps/gateway/Dockerfile }
+    build: { context: ., args: { APP: gateway, PORT: "3000" } }
     environment:
       <<: *service-env
       PORT: 3000
