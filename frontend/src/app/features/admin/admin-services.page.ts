@@ -176,7 +176,6 @@ interface Snapshot {
 })
 export class AdminServicesPage {
   private readonly api = inject(ServicesService);
-  protected readonly info = INFO;
   /** A service this page doesn't know yet (added in the backend later) gets a plain card, not a crash. */
   protected infoFor(name: string) {
     return INFO[name as ServiceStatus['service']] ?? { title: `${name} service`, icon: 'grid' as IconName, port: 0, owns: '', script: `npm run dev -w @scalecart/${name}` };

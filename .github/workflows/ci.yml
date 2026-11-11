@@ -2,7 +2,9 @@
 #
 #   checks   boundary check + type-check + EVERY test, against a real PostgreSQL (one database and
 #            one database user per service, created exactly like on a developer machine)
-#   changes  which apps did this push touch?  (a change in packages/ touches every app)
+#   changes  which apps did this push touch?  (a change in packages/ or a shared build file -
+#            root package.json, lock file, tsconfig.base.json, .dockerignore, this workflow -
+#            touches every app)
 #   images   builds the container image of ONLY the changed apps, in parallel (one job per app)
 #
 # That is "a pipeline per service" in a monorepo: changing the payment service rebuilds the payment
@@ -13,6 +15,11 @@ on:
   push:
     branches: [main, "m6.5-*"]
   pull_request:
+
+# Least privilege for the GITHUB_TOKEN; paths-filter needs to read the PR's file list.
+permissions:
+  contents: read
+  pull-requests: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -62,15 +69,15 @@ jobs:
         id: filter
         with:
           filters: |
-            gateway: ["apps/gateway/**", "packages/**", "package-lock.json"]
-            identity: ["apps/identity/**", "packages/**", "package-lock.json"]
-            catalog: ["apps/catalog/**", "packages/**", "package-lock.json"]
-            order: ["apps/order/**", "packages/**", "package-lock.json"]
-            payment: ["apps/payment/**", "packages/**", "package-lock.json"]
-            inventory: ["apps/inventory/**", "packages/**", "package-lock.json"]
-            notification: ["apps/notification/**", "packages/**", "package-lock.json"]
-            scalekv: ["apps/scalekv/**", "packages/**", "package-lock.json"]
-            scalelog: ["apps/scalelog/**", "packages/**", "package-lock.json"]
+            gateway: ["apps/gateway/**", "packages/**", "package.json", "package-lock.json", "tsconfig.base.json", ".dockerignore", ".github/workflows/ci.yml"]
+            identity: ["apps/identity/**", "packages/**", "package.json", "package-lock.json", "tsconfig.base.json", ".dockerignore", ".github/workflows/ci.yml"]
+            catalog: ["apps/catalog/**", "packages/**", "package.json", "package-lock.json", "tsconfig.base.json", ".dockerignore", ".github/workflows/ci.yml"]
+            order: ["apps/order/**", "packages/**", "package.json", "package-lock.json", "tsconfig.base.json", ".dockerignore", ".github/workflows/ci.yml"]
+            payment: ["apps/payment/**", "packages/**", "package.json", "package-lock.json", "tsconfig.base.json", ".dockerignore", ".github/workflows/ci.yml"]
+            inventory: ["apps/inventory/**", "packages/**", "package.json", "package-lock.json", "tsconfig.base.json", ".dockerignore", ".github/workflows/ci.yml"]
+            notification: ["apps/notification/**", "packages/**", "package.json", "package-lock.json", "tsconfig.base.json", ".dockerignore", ".github/workflows/ci.yml"]
+            scalekv: ["apps/scalekv/**", "packages/**", "package.json", "package-lock.json", "tsconfig.base.json", ".dockerignore", ".github/workflows/ci.yml"]
+            scalelog: ["apps/scalelog/**", "packages/**", "package.json", "package-lock.json", "tsconfig.base.json", ".dockerignore", ".github/workflows/ci.yml"]
 
   images:
     needs: [checks, changes]

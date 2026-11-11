@@ -7,6 +7,8 @@
 
 # ---------- stage 1: build ----------
 FROM node:20.19-alpine AS build
+# Prisma's migrate engine needs OpenSSL, which Alpine doesn't ship (migrations run in THIS stage).
+RUN apk add --no-cache openssl
 WORKDIR /repo
 
 # Manifests first, sources later: Docker caches this layer, so `npm ci` only re-runs when a

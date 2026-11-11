@@ -37,8 +37,18 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres-dev-password}
+      # The init script creates each service's DB user with THESE passwords - the same variables the
+      # services and migration jobs below connect with (code review: they were missing here).
+      IDENTITY_DB_PASSWORD: ${IDENTITY_DB_PASSWORD:-identity-dev-password}
+      CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:-catalog-dev-password}
+      ORDER_DB_PASSWORD: ${ORDER_DB_PASSWORD:-order-dev-password}
+      INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:-inventory-dev-password}
+      PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD:-payment-dev-password}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:-notification-dev-password}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # A NEW volume name: init scripts only run on an EMPTY data directory, so reusing the old
+      # single-database volume would silently skip creating the per-service databases.
+      - pgdata-services:/var/lib/postgresql/data
       - ./infra/postgres/init-service-dbs.sh:/docker-entrypoint-initdb.d/10-service-dbs.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
@@ -162,5 +172,5 @@ services:
     depends_on: [identity, catalog, order, payment, inventory, notification]
 
 volumes:
-  pgdata:
+  pgdata-services:
   scalelog-data:

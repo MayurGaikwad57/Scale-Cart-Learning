@@ -175,5 +175,9 @@ while coding) and as compiled JavaScript in production (`tsc -b` builds them fir
 
 - **Dual write** (save to DB, then publish) can lose an event if the process dies in between — M7's **outbox**
   fixes it, per service.
+- Follow-ups from the PR #6 code review (valid, not done yet - they need a real Docker to verify):
+  each image's `node_modules` holds the production dependencies of ALL workspaces (prune per app instead);
+  the 9 Dockerfiles are near copies (one Dockerfile with `ARG APP/PORT/ENTRY`); the admin Events page keeps its
+  own list of consumer groups (build it from the API's `cluster.groups` instead).
 - Our own ScaleKV / ScaleLog instead of Redis / Kafka, everything on one machine (no Docker locally — CI builds
   the images). The **architecture** is real-world; the **infrastructure** is local.
