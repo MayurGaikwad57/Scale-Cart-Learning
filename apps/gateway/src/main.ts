@@ -3,7 +3,7 @@ import { kv } from "@scalecart/service-kit/kv";
 import { serviceUrls } from "@scalecart/service-kit/registry";
 import { createGatewayApp } from "./app.js";
 
-// npm run svc:gateway. The gateway has no database: it only needs ScaleKV for the shared rate limit.
+// npm run dev -w @scalecart/gateway. The gateway has no database: it only needs ScaleKV for the shared rate limit.
 if (env.KV_URL) kv.connect(env.KV_URL);
 
 const server = createGatewayApp().listen(env.PORT, () => {

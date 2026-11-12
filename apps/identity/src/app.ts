@@ -1,6 +1,6 @@
 import { createServiceApp } from "@scalecart/service-kit/service-app";
 import { db } from "./config/prisma.js";
-import { jwks } from "./keys.js";
+import { keysRouter } from "./keys.routes.js";
 import { authRouter } from "./modules/users/users.routes.js";
 
 /**
@@ -13,14 +13,15 @@ import { authRouter } from "./modules/users/users.routes.js";
  * here, a bug in the cart can never leak a password hash or mint an admin token - and the login path
  * (bcrypt is CPU-heavy on purpose) can be scaled separately. Real systems often use an off-the-shelf
  * identity provider for this role (Keycloak, Auth0, Okta, Cognito) - same idea, same JWKS standard.
+ *
+ * This file only ASSEMBLES the service (the composition root); the endpoints live in routes files.
  */
 export const createIdentityApp = () =>
   createServiceApp(
     "identity",
     (app) => {
       app.use("/auth", authRouter);
-      // Public keys may be cached by verifiers: they only change on key rotation.
-      app.get("/.well-known/jwks.json", (_req, res) => res.set("Cache-Control", "public, max-age=300").json(jwks()));
+      app.use(keysRouter); // GET /.well-known/jwks.json
     },
     { db },
   );
