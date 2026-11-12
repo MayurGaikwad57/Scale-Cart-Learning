@@ -5,7 +5,7 @@ import { runService } from "@scalecart/service-kit/service-app";
 import { createOrderApp } from "./app.js";
 import { startReconciler, stopReconciler } from "./reconciler.js";
 
-// npm run svc:order
+// npm run dev -w @scalecart/order
 runService({
   name: "order",
   port: env.ORDER_PORT,

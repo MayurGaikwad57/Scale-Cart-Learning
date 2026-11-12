@@ -5,7 +5,7 @@ import { runService } from "@scalecart/service-kit/service-app";
 import { createInventoryApp } from "./app.js";
 import { startSweeper, stopSweeper } from "./sweeper.js";
 
-// npm run svc:inventory
+// npm run dev -w @scalecart/inventory
 runService({
   name: "inventory",
   port: env.INVENTORY_PORT,
